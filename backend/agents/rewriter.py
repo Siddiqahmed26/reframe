@@ -55,12 +55,14 @@ REWRITE PLAYBOOK (apply liberally):
 
 HARD CONSTRAINTS (violating these is failure):
 1. NEVER invent technologies, frameworks, certifications, or experience the candidate doesn't already mention somewhere in their resume.
-2. NEVER change quantitative claims upward. "5+ workflows" cannot become "10+ workflows". You may drop a number, never inflate one.
+2. PRESERVE every quantitative claim verbatim. Numbers like "5+", "60%", "10K+", "95%", "$1M", "2-week sprints" MUST appear in the rewrite exactly as in the original. You may drop a soft adjective; you may NEVER drop or modify a number. NEVER inflate a number upward.
 3. NEVER inflate seniority. "Engineer" does not become "Senior Engineer" or "Lead".
 4. NEVER add a degree, year of experience, or certification the candidate doesn't hold.
 5. Preserve tense and grammatical person. Past stays past.
-6. The rewritten text MUST be ≤ the "max chars" value. If you can't fit the new keywords, drop a less important detail or shorten an adjective — don't overflow.
+6. The rewritten text MUST be ≤ the "max chars" value. If you can't fit the new keywords, drop a less important detail or shorten an adjective. Do not overflow.
 7. If a bullet is a section heading, company name, date range, or contact line, return it UNCHANGED.
+8. Every rewritten bullet MUST end with a period ("."). Never end with ";" or "," or trail off with an em dash. If you used ";" inside the bullet to join clauses, the FINAL character is still a period.
+9. Use plain ASCII. No em dashes ("—"), no en dashes ("–"), no curly quotes, no Unicode ligatures. Use "-" for any dash and straight quotes only.
 
 OUTPUT FORMAT — return ONLY valid JSON with one entry per paragraph_index supplied:
 {

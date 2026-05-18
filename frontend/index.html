@@ -2294,22 +2294,22 @@
 
     function updateBanner(state) {
       // state: { remaining, limit, using_user_key }
+      // If the user has a saved key, hide it (they already picked BYOK).
+      if (state.using_user_key) { banner.classList.remove('is-on'); return; }
+      // If they explicitly dismissed it this session, respect that.
       if (bannerDismissed) { banner.classList.remove('is-on'); return; }
-      if (state.using_user_key) {
-        banner.classList.remove('is-on');
-        return;
-      }
+      // Otherwise show with copy that escalates as the shared pool drains.
       if (state.remaining <= 0) {
         qbTitle.innerHTML = 'Shared key is <em>spent for today</em>.';
-        qbSub.textContent = 'Plug in a free Groq or Gemini key to keep going. Stored only in this browser.';
-        banner.classList.add('is-on');
+        qbSub.textContent = 'Add a free Groq or Gemini key to keep going. Stored only in this browser.';
       } else if (state.remaining < 3) {
         qbTitle.innerHTML = `${state.remaining} shared <em>run${state.remaining === 1 ? '' : 's'}</em> left today.`;
         qbSub.textContent = 'Save the rest for someone else. Plug in your own free key to run unlimited.';
-        banner.classList.add('is-on');
       } else {
-        banner.classList.remove('is-on');
+        qbTitle.innerHTML = 'Want unlimited runs? <em>Bring your own key.</em>';
+        qbSub.textContent = 'Free Groq or Gemini keys work great. Stored in this browser only, never on our server.';
       }
+      banner.classList.add('is-on');
     }
     async function fetchQuota() {
       try {

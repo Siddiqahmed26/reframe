@@ -104,7 +104,33 @@ _GLYPH_FALLBACKS = {
     "…": "...",     # … ellipsis
     " ": " ",       # non-breaking space (safer as plain)
     "​": "",        # zero-width space
+    # Latin ligatures (U+FB00..U+FB06): expand so ATS keyword extraction sees
+    # real letters. Without this, "fine-tuning" renders as the FB01 glyph and
+    # extracts as the ligature char, missing the keyword.
+    "ﬀ": "ff",
+    "ﬁ": "fi",
+    "ﬂ": "fl",
+    "ﬃ": "ffi",
+    "ﬄ": "ffl",
+    "ﬅ": "st",
+    "ﬆ": "st",
 }
+
+
+def _normalize_sentence_endings(text: str) -> str:
+    """Replace a trailing semicolon with a period.
+
+    The rewriter sometimes ends a bullet with ';' because the source clause
+    was joined in a longer compound sentence and the LLM stopped mid-list.
+    A trailing ';' reads as 'unfinished'. Internal semicolons are kept
+    (often valid in long-form bullets).
+    """
+    if not text:
+        return text
+    stripped = text.rstrip()
+    if stripped.endswith(";"):
+        return stripped[:-1].rstrip() + "."
+    return text
 
 
 def _sanitize_for_base_font(text: str) -> str:
@@ -171,6 +197,10 @@ def _try_insert_html(page, rect, new_text: str, base_size: float,
         return False
 
     r, g, b = (int(color[0] * 255), int(color[1] * 255), int(color[2] * 255))
+    # font-variant-ligatures: none + feature-settings disable common ligatures
+    # (fi, fl, ff). Without this, PyMuPDF's Story renderer emits U+FB01/FB02
+    # glyphs, which extract as "ﬁ"/"ﬂ" and break ATS keyword matching
+    # ("fine-tuning" -> "ne-tuning" miss).
     css = (
         "* { margin: 0; padding: 0; }\n"
         "body {\n"
@@ -178,6 +208,8 @@ def _try_insert_html(page, rect, new_text: str, base_size: float,
         f"  font-size: {base_size:.1f}pt;\n"
         f"  color: rgb({r}, {g}, {b});\n"
         "  line-height: 1.15;\n"
+        "  font-variant-ligatures: none;\n"
+        "  font-feature-settings: \"liga\" 0, \"clig\" 0, \"dlig\" 0, \"hlig\" 0;\n"
         "}\n"
         "b { font-weight: bold; }\n"
     )
@@ -254,6 +286,7 @@ def apply_rewrites(
             continue
         new_text = _preserve_bullet_prefix(ins.original, ins.rewritten.strip())
         new_text = _sanitize_for_base_font(new_text)
+        new_text = _normalize_sentence_endings(new_text)
         edits_by_page.setdefault(blk.page_idx, []).append((blk, new_text))
 
     for page_idx, edits in edits_by_page.items():
@@ -331,11 +364,16 @@ def _insert_into_block(page, blk: PdfBlock, new_text: str) -> None:
             return
 
     # Doesn't fit even at 0.94× — truncate the text rather than shrink further,
-    # so all bullets stay at the same visual size. Truncate aggressively in
-    # 10% steps from the tail until it fits at the slightly-smaller size.
+    # so all bullets stay at the same visual size. Cut at word boundaries so
+    # we never end with "language mod." or similar mid-word stubs.
     truncated = new_text
     while len(truncated) > 20:
-        truncated = truncated[: int(len(truncated) * 0.9)].rstrip(" ,;.") + "."
+        target = int(len(truncated) * 0.9)
+        # Back off to the nearest preceding space within a 40-char window so
+        # we never split a word. Falls back to a hard cut if no space found.
+        sp = truncated.rfind(" ", max(20, target - 40), target)
+        cut = sp if sp >= 20 else target
+        truncated = truncated[:cut].rstrip(" ,;.:") + "."
         rc = page.insert_textbox(
             rect,
             truncated,
