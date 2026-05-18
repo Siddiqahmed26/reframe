@@ -21,7 +21,7 @@ Rules:
 """
 
 
-def generate(jd: JDAnalysis, resume: ResumeAnalysis) -> str:
+def generate(jd: JDAnalysis, resume: ResumeAnalysis, *, llm: "LLM | None" = None) -> str:
     user = f"""Job description analysis:
 {jd.model_dump_json(indent=2)}
 
@@ -30,12 +30,14 @@ Candidate resume analysis:
 
 Write the cover letter now.
 """
-    # Use the FAST model. Reasons:
+    # Default path uses the FAST model. Reasons:
     #   1. Cover-letter prose doesn't need the strongest model — it's
     #      single-shot generation with no schema to follow.
     #   2. The fast model on Groq (llama-3.1-8b-instant) has its own
     #      independent daily token quota (500K) separate from the main
     #      model's (gpt-oss-120b @ 200K). So the cover letter still
     #      generates even when the rewriter has exhausted the main quota.
-    llm = LLM(fast=True)
+    # BYOK injects a single user-provided model; respect it as-is.
+    if llm is None:
+        llm = LLM(fast=True)
     return llm.complete(system=SYSTEM, user=user, max_tokens=1500, temperature=0.4)

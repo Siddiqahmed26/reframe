@@ -32,11 +32,12 @@ Rules:
 """
 
 
-def analyze(resume_text: str, heuristic: ResumeAnalysis | None = None) -> ResumeAnalysis:
+def analyze(resume_text: str, heuristic: ResumeAnalysis | None = None, *, llm: "LLM | None" = None) -> ResumeAnalysis:
     if not resume_text or not resume_text.strip():
         return heuristic or ResumeAnalysis()
 
-    llm = LLM()
+    if llm is None:
+        llm = LLM()
     data = llm.complete_json(
         system=SYSTEM,
         user=f"Resume text:\n\n{resume_text}",

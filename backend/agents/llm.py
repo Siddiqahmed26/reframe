@@ -109,14 +109,36 @@ def _build_groq(settings, fast):
     return _Provider("groq", client, model, _openai_compat_complete)
 
 
+def _build_gemini(settings, fast):
+    if not settings.gemini_api_key:
+        return None
+    from openai import OpenAI
+    # Gemini exposes an OpenAI-compatible endpoint at /v1beta/openai/.
+    client = OpenAI(api_key=settings.gemini_api_key, base_url=settings.gemini_base_url, max_retries=2)
+    model = settings.gemini_fast_model if fast else settings.gemini_model
+    return _Provider("gemini", client, model, _openai_compat_complete)
+
+
+def _build_openai(settings, fast):
+    if not settings.openai_api_key:
+        return None
+    from openai import OpenAI
+    client = OpenAI(api_key=settings.openai_api_key, base_url=settings.openai_base_url, max_retries=2)
+    model = settings.openai_fast_model if fast else settings.openai_model
+    return _Provider("openai", client, model, _openai_compat_complete)
+
+
 _BUILDERS = {
     "anthropic": _build_anthropic,
     "xai": _build_xai,
     "grok": _build_xai,
     "groq": _build_groq,
+    "gemini": _build_gemini,
+    "openai": _build_openai,
 }
 
-_AUTO_ORDER = ["groq", "xai", "anthropic"]
+# Free, no-card providers first.
+_AUTO_ORDER = ["groq", "gemini", "xai", "openai", "anthropic"]
 
 
 def _classify_error(err) -> float:
@@ -186,13 +208,65 @@ class LLM:
                 self.providers.append(p)
         else:
             raise ValueError(
-                f"Unknown LLM_PROVIDER '{provider}'. Use 'auto', 'anthropic', 'xai', or 'groq'."
+                f"Unknown LLM_PROVIDER '{provider}'. Use 'auto' or one of: "
+                "anthropic, xai, grok, groq, gemini, openai."
             )
 
         if not self.providers:
             raise RuntimeError(
-                "No API keys configured. Set ANTHROPIC_API_KEY, XAI_API_KEY, or GROQ_API_KEY in .env."
+                "No API keys configured. Set ANTHROPIC_API_KEY, XAI_API_KEY, "
+                "GROQ_API_KEY, GEMINI_API_KEY, or OPENAI_API_KEY in .env."
             )
+
+    @classmethod
+    def from_user_key(cls, provider: str, api_key: str, fast: bool = False) -> "LLM":
+        """Build an LLM using a single user-supplied key, no fallback chain.
+
+        The key is held only as the OpenAI/Anthropic client's internal state
+        (in-memory, per request) and never written to settings, env, logs, or
+        disk. Errors raised here deliberately do NOT interpolate the key.
+        """
+        allowed = ("anthropic", "xai", "grok", "groq", "gemini", "openai")
+        prov = (provider or "").lower().strip()
+        if prov not in allowed:
+            # Note: no key in the error message.
+            raise ValueError(f"Unsupported BYOK provider: {prov!r}")
+        if not api_key or not api_key.strip():
+            raise ValueError("BYOK API key is empty.")
+
+        settings = get_settings()
+        # Build a one-off _Provider that ignores the configured settings
+        # for the key field. We re-use the existing complete functions.
+        if prov == "anthropic":
+            from anthropic import Anthropic
+            client = Anthropic(api_key=api_key)
+            model = settings.anthropic_fast_model if fast else settings.anthropic_model
+            p = _Provider("anthropic", client, model, _anthropic_complete)
+        else:
+            from openai import OpenAI
+            if prov in ("xai", "grok"):
+                base = settings.xai_base_url
+                model = settings.xai_fast_model if fast else settings.xai_model
+                name = "xai"
+            elif prov == "groq":
+                base = settings.groq_base_url
+                model = settings.groq_fast_model if fast else settings.groq_model
+                name = "groq"
+            elif prov == "gemini":
+                base = settings.gemini_base_url
+                model = settings.gemini_fast_model if fast else settings.gemini_model
+                name = "gemini"
+            else:  # openai
+                base = settings.openai_base_url
+                model = settings.openai_fast_model if fast else settings.openai_model
+                name = "openai"
+            client = OpenAI(api_key=api_key, base_url=base, max_retries=2)
+            p = _Provider(name, client, model, _openai_compat_complete)
+
+        inst = cls.__new__(cls)
+        inst.settings = settings
+        inst.providers = [p]
+        return inst
 
     def complete(self, system: str, user: str, max_tokens: int = 2048, temperature: float = 0.2) -> str:
         last_err: Optional[Exception] = None

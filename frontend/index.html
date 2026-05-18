@@ -587,6 +587,241 @@
     .reveal { opacity: 0; transform: translateY(20px); transition: opacity 0.7s ease, transform 0.7s ease; }
     .reveal.is-in { opacity: 1; transform: translateY(0); }
 
+    /* ── BYOK quota banner ── */
+    .quota-banner {
+      display: none;
+      margin: 0 auto 24px;
+      padding: 16px 22px;
+      background: rgba(91,232,197,0.06);
+      border: 1px solid rgba(91,232,197,0.35);
+      border-radius: 16px;
+      backdrop-filter: blur(12px) saturate(120%);
+      -webkit-backdrop-filter: blur(12px) saturate(120%);
+      box-shadow: 0 0 0 1px rgba(91,232,197,0.08) inset, 0 8px 30px rgba(91,232,197,0.08);
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+    }
+    .quota-banner.is-on { display: flex; }
+    .quota-banner .qb-left { display: flex; gap: 14px; align-items: center; flex: 1; min-width: 0; }
+    .quota-banner .qb-icon {
+      flex: 0 0 36px; height: 36px;
+      display: grid; place-items: center;
+      background: rgba(91,232,197,0.1);
+      border: 1px solid rgba(91,232,197,0.35);
+      border-radius: 10px;
+      color: var(--accent);
+    }
+    .quota-banner .qb-text { min-width: 0; }
+    .quota-banner .qb-title {
+      font-family: var(--serif);
+      font-size: 18px;
+      letter-spacing: -0.01em;
+      margin-bottom: 2px;
+    }
+    .quota-banner .qb-title em { font-style: italic; color: var(--accent); }
+    .quota-banner .qb-sub { font-size: 13px; color: var(--muted); }
+    .quota-banner .qb-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .quota-banner .qb-btn-primary,
+    .quota-banner .qb-btn-ghost {
+      font-family: var(--sans);
+      font-size: 13px; font-weight: 600;
+      padding: 9px 16px;
+      border-radius: 999px;
+      cursor: pointer;
+      min-height: 38px;
+      border: 1px solid transparent;
+    }
+    .quota-banner .qb-btn-primary { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+    .quota-banner .qb-btn-primary:hover { filter: brightness(1.08); }
+    .quota-banner .qb-btn-ghost {
+      background: rgba(255,255,255,0.04);
+      border-color: rgba(255,255,255,0.12);
+      color: var(--muted);
+    }
+    .quota-banner .qb-btn-ghost:hover { color: var(--text); border-color: rgba(91,232,197,0.4); }
+    @media (max-width: 600px) {
+      .quota-banner { flex-direction: column; align-items: stretch; padding: 14px 16px; }
+      .quota-banner .qb-actions .qb-btn-primary,
+      .quota-banner .qb-actions .qb-btn-ghost { flex: 1; }
+    }
+
+    /* ── BYOK modal ── */
+    .modal-backdrop {
+      position: fixed; inset: 0;
+      z-index: 400;
+      background: rgba(3,5,12,0.7);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      display: none;
+      align-items: center; justify-content: center;
+      padding: 20px;
+    }
+    .modal-backdrop.is-on { display: flex; }
+    .modal {
+      max-width: 520px; width: 100%;
+      background: rgba(14,20,38,0.92);
+      backdrop-filter: blur(20px) saturate(120%);
+      -webkit-backdrop-filter: blur(20px) saturate(120%);
+      border: 1px solid rgba(91,232,197,0.25);
+      border-radius: 20px;
+      padding: 28px 28px 22px;
+      box-shadow: 0 30px 90px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.05);
+      max-height: 90vh; overflow: auto;
+    }
+    .modal h3 {
+      font-family: var(--serif);
+      font-weight: 400;
+      font-size: 28px;
+      letter-spacing: -0.015em;
+      margin: 0 0 8px;
+    }
+    .modal h3 em { font-style: italic; color: var(--accent); }
+    .modal p.modal-sub {
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.5;
+      margin: 0 0 18px;
+    }
+    .modal label.modal-field-label {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--dim);
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      display: block;
+      margin: 14px 0 8px;
+    }
+    .modal select,
+    .modal input[type="password"],
+    .modal input[type="text"] {
+      width: 100%;
+      background: rgba(0,0,0,0.4);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 10px;
+      padding: 12px 14px;
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 13px;
+      min-height: 44px;
+    }
+    .modal select { font-family: var(--sans); font-size: 14px; }
+    .modal select:focus,
+    .modal input:focus { outline: none; border-color: rgba(91,232,197,0.5); background: rgba(0,0,0,0.55); }
+    .modal .key-row { position: relative; }
+    .modal .key-row .eye {
+      position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+      background: transparent; border: 0; cursor: pointer;
+      color: var(--muted); padding: 6px;
+      display: grid; place-items: center;
+    }
+    .modal .key-row .eye:hover { color: var(--accent); }
+    .modal .key-help {
+      display: block;
+      margin-top: 8px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .modal .key-help a { color: var(--accent); text-decoration: underline; text-decoration-color: rgba(91,232,197,0.4); }
+    .modal .modal-foot {
+      margin-top: 18px;
+      padding-top: 16px;
+      border-top: 1px solid rgba(255,255,255,0.06);
+      font-size: 12px;
+      color: var(--dim);
+      line-height: 1.5;
+    }
+    .modal .modal-actions {
+      display: flex; gap: 10px; justify-content: flex-end;
+      margin-top: 20px;
+    }
+    .modal .btn-cancel,
+    .modal .btn-save {
+      font-size: 14px; font-weight: 600;
+      padding: 11px 22px;
+      border-radius: 999px;
+      cursor: pointer;
+      min-height: 44px;
+      border: 1px solid transparent;
+    }
+    .modal .btn-cancel {
+      background: rgba(255,255,255,0.04);
+      border-color: rgba(255,255,255,0.12);
+      color: var(--muted);
+    }
+    .modal .btn-cancel:hover { color: var(--text); }
+    .modal .btn-save { background: var(--accent); color: var(--bg); }
+    .modal .btn-save:hover { filter: brightness(1.08); }
+    @media (max-width: 500px) {
+      .modal { padding: 22px 20px; border-radius: 16px; }
+      .modal h3 { font-size: 24px; }
+      .modal .modal-actions { flex-direction: column-reverse; }
+      .modal .btn-cancel, .modal .btn-save { width: 100%; }
+    }
+
+    /* ── progress stepper (replaces spinner) ── */
+    .stepper {
+      display: flex; gap: 10px;
+      justify-content: center;
+      margin-bottom: 22px;
+      flex-wrap: wrap;
+    }
+    .step-pill {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 8px 16px;
+      border-radius: 999px;
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(255,255,255,0.03);
+      color: var(--muted);
+      transition: background 0.4s, color 0.4s, border-color 0.4s;
+    }
+    .step-pill.is-active {
+      background: var(--accent);
+      color: var(--bg);
+      border-color: var(--accent);
+      box-shadow: 0 6px 24px rgba(91,232,197,0.32);
+    }
+    .step-pill.is-done {
+      background: rgba(91,232,197,0.18);
+      color: #cffef0;
+      border-color: rgba(91,232,197,0.4);
+    }
+    .step-pill .pip {
+      width: 14px; height: 14px;
+      display: inline-grid; place-items: center;
+    }
+    .step-pill.is-active .pip::after {
+      content: ""; width: 10px; height: 10px;
+      border: 2px solid currentColor; border-top-color: transparent;
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+    }
+    .step-pill.is-done .pip::after {
+      content: "";
+      width: 10px; height: 10px;
+      background: currentColor;
+      -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'><polyline points='20 6 9 17 4 12'/></svg>") center/contain no-repeat;
+              mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'><polyline points='20 6 9 17 4 12'/></svg>") center/contain no-repeat;
+    }
+    .clear-key-link {
+      display: inline-block; margin-top: 14px;
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--muted);
+      cursor: pointer;
+      background: transparent; border: 0;
+      padding: 0;
+    }
+    .clear-key-link:hover { color: var(--accent); }
+    .clear-key-link.is-on { display: inline-block; }
+    .clear-key-link.is-off { display: none; }
+
     /* ── SM (481-767): large phones, small tablets portrait ── */
     @media (max-width: 767px) {
       nav.top { padding: 14px 20px; }
@@ -800,6 +1035,23 @@
           <h2 class="section-title">Drop in. <em>Paste the JD.</em></h2>
           <p class="section-sub">PDF or DOCX. The pipeline returns the same file in the same format, with the same fonts and layout. Only the bullet text changes.</p>
         </div>
+
+        <div class="quota-banner" id="quota-banner" role="region" aria-label="Shared quota notice">
+          <div class="qb-left">
+            <div class="qb-icon" aria-hidden="true">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 7a4 4 0 1 1-4 4 4 4 0 0 1 4-4z"/><path d="M11 11L3 19v2h2l8-8"/></svg>
+            </div>
+            <div class="qb-text">
+              <div class="qb-title" id="qb-title">Spare the shared key. <em>Bring your own.</em></div>
+              <div class="qb-sub" id="qb-sub">Plug in a free Groq or Gemini key and run unlimited tailors. Your key stays in this browser.</div>
+            </div>
+          </div>
+          <div class="qb-actions">
+            <button type="button" class="qb-btn-primary" id="qb-open">Use my own key</button>
+            <button type="button" class="qb-btn-ghost" id="qb-dismiss">Stay on shared</button>
+          </div>
+        </div>
+
         <form id="f" class="upload-card reveal">
           <div class="upload-grid">
             <div>
@@ -828,6 +1080,7 @@
               <span>Also generate a cover letter</span>
             </label>
           </div>
+          <button type="button" class="clear-key-link is-off" id="clear-key">Forget my saved key</button>
         </form>
 
         <div id="results">
@@ -876,10 +1129,56 @@
     </div>
   </footer>
 
-  <div class="loader" id="loader">
-    <div class="loader-spin"></div>
-    <div class="loader-label" id="loader-label">Reading resume</div>
+  <div class="loader" id="loader" aria-live="polite">
+    <div class="stepper" id="stepper" role="list">
+      <div class="step-pill is-active" data-step="0" role="listitem">
+        <span class="pip" aria-hidden="true"></span><span>Parse</span>
+      </div>
+      <div class="step-pill" data-step="1" role="listitem">
+        <span class="pip" aria-hidden="true"></span><span>Match</span>
+      </div>
+      <div class="step-pill" data-step="2" role="listitem">
+        <span class="pip" aria-hidden="true"></span><span>Rewrite</span>
+      </div>
+    </div>
+    <div class="loader-label" id="loader-label">Reading your resume</div>
     <div class="loader-detail" id="loader-detail">Extracting text, fonts, and layout.</div>
+  </div>
+
+  <div class="modal-backdrop" id="byok-backdrop" role="dialog" aria-modal="true" aria-labelledby="byok-title">
+    <div class="modal" id="byok-modal">
+      <h3 id="byok-title">Bring your <em>own key</em>.</h3>
+      <p class="modal-sub">Held in this browser only. Sent only to the provider you pick, in-memory through Reframe, never stored on our side.</p>
+
+      <label class="modal-field-label" for="byok-provider">Provider</label>
+      <select id="byok-provider">
+        <option value="groq" data-hint="gsk_..." data-href="https://console.groq.com/keys">Groq. free, no card</option>
+        <option value="gemini" data-hint="AIza..." data-href="https://aistudio.google.com/apikey">Gemini. free, no card</option>
+        <option value="xai" data-hint="xai-..." data-href="https://console.x.ai">xAI Grok. free credits</option>
+        <option value="openai" data-hint="sk-..." data-href="https://platform.openai.com/api-keys">OpenAI. paid, card required</option>
+        <option value="anthropic" data-hint="sk-ant-..." data-href="https://console.anthropic.com">Anthropic. paid, card required</option>
+      </select>
+
+      <label class="modal-field-label" for="byok-key">API key</label>
+      <div class="key-row">
+        <input id="byok-key" type="password" autocomplete="off" spellcheck="false" placeholder="gsk_..." />
+        <button type="button" class="eye" id="byok-eye" aria-label="Toggle key visibility">
+          <svg id="byok-eye-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        </button>
+      </div>
+      <span class="key-help">
+        Need a key? <a id="byok-help" href="https://console.groq.com/keys" target="_blank" rel="noopener">Get a Groq key</a>. Opens in a new tab.
+      </span>
+
+      <div class="modal-foot">
+        Your key is saved to <code>localStorage</code> in this browser only. When you submit, it travels in the <code>X-User-API-Key</code> request header, used in-memory by the Reframe process, then passed through to the provider over TLS. Reframe does not log or persist the key.
+      </div>
+
+      <div class="modal-actions">
+        <button type="button" class="btn-cancel" id="byok-cancel">Cancel</button>
+        <button type="button" class="btn-save" id="byok-save">Save and continue</button>
+      </div>
+    </div>
   </div>
 
   <div class="toast" id="toast"></div>
@@ -1855,29 +2154,48 @@
     const loader = document.getElementById('loader');
     const loaderLabel = document.getElementById('loader-label');
     const loaderDetail = document.getElementById('loader-detail');
-    const LOAD_STAGES = [
-      { at: 0,  label: 'Reading resume',         detail: 'Extracting text, fonts, and layout.' },
-      { at: 5,  label: 'Analyzing JD',            detail: 'Pulling required skills, keywords, seniority.' },
-      { at: 18, label: 'Matching requirements',   detail: 'Mapping what you have against what the JD asks.' },
-      { at: 38, label: 'Rewriting bullets',       detail: 'Surfacing JD vocabulary, truthfully. Longest step.' },
-      { at: 72, label: 'Writing tailored output', detail: 'Inserting rewrites with preserved formatting.' },
+    const stepPills = document.querySelectorAll('#stepper .step-pill');
+    // Three-stage stepper. Time thresholds drive activation; the last stage
+    // is "active forever" until the response lands.
+    const STEPS = [
+      { idx: 0, label: 'Reading your resume', detail: 'Extracting text, fonts, and layout.' },
+      { idx: 1, label: 'Matching the JD',     detail: 'Mapping what you have to what the role asks.' },
+      { idx: 2, label: 'Rewriting bullets',   detail: 'Surfacing JD vocabulary. Truthfully, never inventing.' },
     ];
+    function _stepIndex(t) {
+      if (t < 6) return 0;
+      if (t < 18) return 1;
+      return 2;
+    }
+    function setStepperState(active) {
+      stepPills.forEach((pill, i) => {
+        pill.classList.toggle('is-active', i === active);
+        pill.classList.toggle('is-done',   i < active);
+      });
+    }
     let loadStart = 0, loadRaf = 0;
     function startLoading() {
       loader.classList.add('is-on');
       loadStart = Date.now();
+      setStepperState(0);
+      loaderLabel.textContent = STEPS[0].label;
+      loaderDetail.textContent = STEPS[0].detail;
       tickLoader();
     }
     function tickLoader() {
       const t = (Date.now() - loadStart) / 1000;
-      let cur = LOAD_STAGES[0];
-      for (let i = LOAD_STAGES.length - 1; i >= 0; i--) if (t >= LOAD_STAGES[i].at) { cur = LOAD_STAGES[i]; break; }
-      loaderLabel.textContent = cur.label;
-      loaderDetail.textContent = cur.detail;
+      const idx = _stepIndex(t);
+      setStepperState(idx);
+      loaderLabel.textContent = STEPS[idx].label;
+      loaderDetail.textContent = STEPS[idx].detail;
       loadRaf = requestAnimationFrame(tickLoader);
     }
-    function stopLoading() {
+    function stopLoading(success) {
       cancelAnimationFrame(loadRaf);
+      if (success) {
+        // Mark all done briefly so the final state reads complete.
+        stepPills.forEach(p => { p.classList.remove('is-active'); p.classList.add('is-done'); });
+      }
       loader.classList.remove('is-on');
     }
 
@@ -1927,6 +2245,158 @@
       step();
     }
 
+    // ────────── BYOK + quota ──────────
+    const LS_PROVIDER = 'reframe.byok.provider';
+    const LS_KEY      = 'reframe.byok.key';
+    const BYOK_HINTS = {
+      groq:      { hint: 'gsk_...',    href: 'https://console.groq.com/keys',         label: 'Get a Groq key' },
+      gemini:    { hint: 'AIza...',    href: 'https://aistudio.google.com/apikey',    label: 'Get a Gemini key' },
+      xai:       { hint: 'xai-...',    href: 'https://console.x.ai',                  label: 'Get an xAI key' },
+      openai:    { hint: 'sk-...',     href: 'https://platform.openai.com/api-keys',  label: 'Get an OpenAI key' },
+      anthropic: { hint: 'sk-ant-...', href: 'https://console.anthropic.com',         label: 'Get an Anthropic key' },
+    };
+
+    const banner       = document.getElementById('quota-banner');
+    const qbTitle      = document.getElementById('qb-title');
+    const qbSub        = document.getElementById('qb-sub');
+    const qbOpenBtn    = document.getElementById('qb-open');
+    const qbDismissBtn = document.getElementById('qb-dismiss');
+    const clearKeyBtn  = document.getElementById('clear-key');
+
+    const byokBackdrop = document.getElementById('byok-backdrop');
+    const byokProvider = document.getElementById('byok-provider');
+    const byokKey      = document.getElementById('byok-key');
+    const byokEyeBtn   = document.getElementById('byok-eye');
+    const byokHelp     = document.getElementById('byok-help');
+    const byokCancel   = document.getElementById('byok-cancel');
+    const byokSave     = document.getElementById('byok-save');
+
+    let bannerDismissed = false;
+
+    function getStoredKey() {
+      try {
+        const p = localStorage.getItem(LS_PROVIDER);
+        const k = localStorage.getItem(LS_KEY);
+        return p && k ? { provider: p, key: k } : null;
+      } catch { return null; }
+    }
+    function setStoredKey(provider, key) {
+      try { localStorage.setItem(LS_PROVIDER, provider); localStorage.setItem(LS_KEY, key); } catch {}
+    }
+    function clearStoredKey() {
+      try { localStorage.removeItem(LS_PROVIDER); localStorage.removeItem(LS_KEY); } catch {}
+    }
+    function refreshClearKeyVisibility() {
+      const stored = getStoredKey();
+      clearKeyBtn.classList.toggle('is-on',  !!stored);
+      clearKeyBtn.classList.toggle('is-off', !stored);
+    }
+
+    function updateBanner(state) {
+      // state: { remaining, limit, using_user_key }
+      if (bannerDismissed) { banner.classList.remove('is-on'); return; }
+      if (state.using_user_key) {
+        banner.classList.remove('is-on');
+        return;
+      }
+      if (state.remaining <= 0) {
+        qbTitle.innerHTML = 'Shared key is <em>spent for today</em>.';
+        qbSub.textContent = 'Plug in a free Groq or Gemini key to keep going. Stored only in this browser.';
+        banner.classList.add('is-on');
+      } else if (state.remaining < 3) {
+        qbTitle.innerHTML = `${state.remaining} shared <em>run${state.remaining === 1 ? '' : 's'}</em> left today.`;
+        qbSub.textContent = 'Save the rest for someone else. Plug in your own free key to run unlimited.';
+        banner.classList.add('is-on');
+      } else {
+        banner.classList.remove('is-on');
+      }
+    }
+    async function fetchQuota() {
+      try {
+        const stored = getStoredKey();
+        const headers = {};
+        if (stored) {
+          headers['X-User-Provider'] = stored.provider;
+          headers['X-User-API-Key']  = stored.key;
+        }
+        const r = await fetch(apiUrl('/api/quota'), { headers });
+        if (!r.ok) return;
+        const d = await r.json();
+        updateBanner(d);
+      } catch {/* ignore */}
+    }
+
+    function refreshKeyUiForProvider() {
+      const p = byokProvider.value;
+      const meta = BYOK_HINTS[p] || BYOK_HINTS.groq;
+      byokKey.placeholder = meta.hint;
+      byokHelp.href = meta.href;
+      byokHelp.textContent = meta.label;
+    }
+    function openByokModal(reason) {
+      const stored = getStoredKey();
+      if (stored && BYOK_HINTS[stored.provider]) {
+        byokProvider.value = stored.provider;
+      }
+      // Never prefill the key field. If the user wants to change keys,
+      // they re-enter it; this avoids accidental on-screen exposure.
+      byokKey.value = '';
+      byokKey.type = 'password';
+      refreshKeyUiForProvider();
+      if (reason === 'quota_exhausted') {
+        qbTitle.innerHTML = 'Shared key is <em>spent for today</em>.';
+        qbSub.textContent = 'Plug in a free Groq or Gemini key to keep going.';
+      }
+      byokBackdrop.classList.add('is-on');
+      setTimeout(() => byokKey.focus(), 50);
+    }
+    function closeByokModal() {
+      byokBackdrop.classList.remove('is-on');
+      // Wipe the in-memory input value defensively. Don't keep it in DOM.
+      byokKey.value = '';
+      byokKey.type = 'password';
+    }
+
+    byokProvider.addEventListener('change', refreshKeyUiForProvider);
+    byokEyeBtn.addEventListener('click', () => {
+      byokKey.type = byokKey.type === 'password' ? 'text' : 'password';
+    });
+    byokCancel.addEventListener('click', closeByokModal);
+    byokBackdrop.addEventListener('click', (e) => {
+      if (e.target === byokBackdrop) closeByokModal();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && byokBackdrop.classList.contains('is-on')) closeByokModal();
+    });
+    byokSave.addEventListener('click', () => {
+      const provider = byokProvider.value;
+      const key = byokKey.value.trim();
+      if (!key) { showToast('Paste your API key first.'); return; }
+      if (!BYOK_HINTS[provider]) { showToast('Pick a provider.'); return; }
+      setStoredKey(provider, key);
+      closeByokModal();
+      bannerDismissed = false;
+      refreshClearKeyVisibility();
+      fetchQuota();
+      showToast('Key saved. It stays in this browser.');
+    });
+
+    qbOpenBtn.addEventListener('click', () => openByokModal('cta'));
+    qbDismissBtn.addEventListener('click', () => {
+      bannerDismissed = true;
+      banner.classList.remove('is-on');
+    });
+    clearKeyBtn.addEventListener('click', () => {
+      clearStoredKey();
+      refreshClearKeyVisibility();
+      fetchQuota();
+      showToast('Saved key forgotten.');
+    });
+
+    refreshClearKeyVisibility();
+    fetchQuota();
+
+    // ────────── form submit ──────────
     const form = document.getElementById('f');
     const goBtn = document.getElementById('go');
     form.addEventListener('submit', async (e) => {
@@ -1939,17 +2409,47 @@
       fd.append('resume', file);
       fd.append('jd', jdTxt);
       fd.append('cover_letter', document.getElementById('cover').checked ? 'true' : 'false');
+
+      const stored = getStoredKey();
+      const headers = {};
+      if (stored) {
+        headers['X-User-Provider'] = stored.provider;
+        headers['X-User-API-Key']  = stored.key;
+      }
+
       goBtn.disabled = true;
       startLoading();
       try {
-        const resp = await fetch(apiUrl('/tailor'), { method: 'POST', body: fd });
+        const resp = await fetch(apiUrl('/tailor'), { method: 'POST', body: fd, headers });
         const ct = resp.headers.get('content-type') || '';
+        if (resp.status === 429) {
+          let body = null;
+          try { body = ct.includes('application/json') ? await resp.json() : null; } catch {}
+          if (body && body.error === 'shared_quota_exhausted') {
+            stopLoading(false);
+            updateBanner({ remaining: 0, limit: 0, using_user_key: false });
+            openByokModal('quota_exhausted');
+            return;
+          }
+          stopLoading(false);
+          showToast((body && body.detail) || 'Too many requests. Slow down for a minute.');
+          return;
+        }
         if (!resp.ok) {
           const txt = ct.includes('application/json') ? (await resp.json()).detail : await resp.text();
           throw new Error(typeof txt === 'string' ? txt : JSON.stringify(txt));
         }
         const data = await resp.json();
-        stopLoading();
+        stopLoading(true);
+
+        // Sync banner using the response header if present.
+        const remHeader = resp.headers.get('X-Shared-Quota-Remaining');
+        if (remHeader !== null && !stored) {
+          updateBanner({ remaining: parseInt(remHeader, 10) || 0, limit: 0, using_user_key: false });
+        } else if (stored) {
+          banner.classList.remove('is-on');
+        }
+
         const results = document.getElementById('results');
         results.style.display = 'block';
         results.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1974,7 +2474,7 @@
           document.getElementById('cl-wrap').style.display = 'none';
         }
       } catch (err) {
-        stopLoading();
+        stopLoading(false);
         showToast(err.message || String(err));
       } finally {
         goBtn.disabled = false;

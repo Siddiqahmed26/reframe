@@ -30,10 +30,11 @@ Rules:
 """
 
 
-def analyze(jd_text: str) -> JDAnalysis:
+def analyze(jd_text: str, *, llm: "LLM | None" = None) -> JDAnalysis:
     if not jd_text or not jd_text.strip():
         return JDAnalysis()
-    llm = LLM()
+    if llm is None:
+        llm = LLM()
     data = llm.complete_json(
         system=SYSTEM,
         user=f"Job description:\n\n{jd_text}",

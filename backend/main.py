@@ -17,13 +17,39 @@ from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
+from backend.agents.llm import LLM
 from backend.agents.orchestrator import run_pipeline
 from backend.config import get_settings
 from backend.models import HealthResponse, TailorResponse, CoverLetterResponse
 from backend.parsers.pdf_parser import ResumeFormatError
+from backend import quota as quota_store
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("reframe")
+
+# Scrub any string that looks like a user-supplied API key from log records.
+# Defense in depth: the route handler never logs the key directly, but a
+# library upstream might include it in a RuntimeError or trace.
+_KEY_PREFIX_RE = re.compile(
+    r"(sk-ant-[A-Za-z0-9_\-]+|sk-[A-Za-z0-9_\-]{8,}|gsk_[A-Za-z0-9_\-]+|"
+    r"xai-[A-Za-z0-9_\-]+|AIza[A-Za-z0-9_\-]+)"
+)
+
+
+class _KeyScrubFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            msg = record.getMessage()
+        except Exception:
+            return True
+        if _KEY_PREFIX_RE.search(msg):
+            record.msg = _KEY_PREFIX_RE.sub("[REDACTED_KEY]", msg)
+            record.args = ()
+        return True
+
+
+for _name in ("", "reframe", "uvicorn", "uvicorn.access", "uvicorn.error"):
+    logging.getLogger(_name).addFilter(_KeyScrubFilter())
 
 settings = get_settings()
 
@@ -69,7 +95,12 @@ app.add_middleware(
     allow_origins=_resolve_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=[
+        "*",
+        "X-User-Provider",
+        "X-User-API-Key",
+    ],
+    expose_headers=["X-Shared-Quota-Remaining"],
 )
 
 
@@ -154,7 +185,43 @@ def _save_upload(upload: UploadFile, dest_dir: Path) -> Path:
 
 
 def _have_any_key() -> bool:
-    return bool(settings.anthropic_api_key or settings.xai_api_key or settings.groq_api_key)
+    return bool(
+        settings.anthropic_api_key
+        or settings.xai_api_key
+        or settings.groq_api_key
+        or settings.gemini_api_key
+        or settings.openai_api_key
+    )
+
+
+def _build_byok_llm(provider: str | None, key: str | None) -> LLM | None:
+    """If both headers are present and non-trivial, return a one-off LLM
+    bound to the user key. None otherwise. Errors here are user-facing and
+    deliberately scrub the key from any details."""
+    if not provider or not key:
+        return None
+    provider = provider.strip().lower()
+    key = key.strip()
+    if not provider or not key:
+        return None
+    try:
+        return LLM.from_user_key(provider, key)
+    except ValueError as e:
+        # ValueError messages are crafted to never include the key.
+        raise HTTPException(status_code=400, detail=f"BYOK rejected: {e}") from e
+
+
+@app.get("/api/quota")
+async def get_quota(request: Request) -> JSONResponse:
+    ip = get_remote_address(request)
+    has_user_key = bool(
+        request.headers.get("X-User-Provider") and request.headers.get("X-User-API-Key")
+    )
+    return JSONResponse({
+        "remaining": quota_store.remaining(ip, settings.shared_daily_quota),
+        "limit": settings.shared_daily_quota,
+        "using_user_key": has_user_key,
+    })
 
 
 @app.post("/tailor", response_model=TailorResponse)
@@ -164,16 +231,39 @@ async def tailor(
     resume: UploadFile = File(..., description="Resume file (.docx or .pdf)"),
     jd: str = Form(..., description="Job description text"),
     cover_letter: bool = Form(False, description="Also generate a cover letter"),
-) -> TailorResponse:
+) -> JSONResponse:
     if not jd or not jd.strip():
         raise HTTPException(status_code=400, detail="Job description is required.")
-    if not _have_any_key():
-        raise HTTPException(status_code=503, detail="Server has no API key set for the chosen LLM_PROVIDER. Add it to .env.")
+
+    # Resolve BYOK first. NEVER log the value of X-User-API-Key.
+    byok_provider = request.headers.get("X-User-Provider")
+    byok_key = request.headers.get("X-User-API-Key")
+    user_llm = _build_byok_llm(byok_provider, byok_key)
+    using_user_key = user_llm is not None
+    client_ip = get_remote_address(request)
+
+    if using_user_key:
+        logger.info("Tailor using BYOK provider=%s ip=%s", (byok_provider or "").lower(), client_ip)
+    else:
+        # Shared keys path: must have at least one server key + quota left.
+        if not _have_any_key():
+            raise HTTPException(
+                status_code=503,
+                detail="Server has no shared API key configured. Add your own key in the BYOK panel.",
+            )
+        if quota_store.is_exhausted(client_ip, settings.shared_daily_quota):
+            payload = {
+                "error": "shared_quota_exhausted",
+                "message": "Daily shared quota reached. Add your own API key to keep going.",
+                "remaining": 0,
+            }
+            resp = JSONResponse(status_code=429, content=payload)
+            resp.headers["X-Shared-Quota-Remaining"] = "0"
+            return resp
 
     saved = _save_upload(resume, UPLOAD_DIR)
     suffix = saved.suffix.lower()  # .docx or .pdf
 
-    # Output path inherits the same extension as the input
     out_name = f"tailored-{uuid.uuid4().hex}{suffix}"
     out_path = OUTPUT_DIR / out_name
 
@@ -186,15 +276,23 @@ async def tailor(
             output_path=out_path,
             want_cover_letter=cover_letter,
             cover_letter_pdf_path=cover_pdf_path,
+            llm_override=user_llm,
         )
     except ResumeFormatError as e:
-        # User-fixable: image-only PDF, encrypted, corrupt.
         logger.warning("Resume format rejected: %s", e)
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
-        # Everything else gets logged with full traceback so we can debug.
         logger.exception("Pipeline failed at step")
         raise HTTPException(status_code=500, detail=f"Pipeline failed: {type(e).__name__}: {e}") from e
+
+    # Count shared usage only on success.
+    if not using_user_key:
+        quota_store.record_usage(client_ip)
+    remaining_after = (
+        quota_store.remaining(client_ip, settings.shared_daily_quota)
+        if not using_user_key
+        else settings.shared_daily_quota
+    )
 
     cover_url = (
         f"/download/{result.cover_letter_pdf_path.name}"
@@ -202,7 +300,7 @@ async def tailor(
         else None
     )
 
-    return TailorResponse(
+    body = TailorResponse(
         download_url=f"/download/{result.output_path.name}",
         output_format=result.output_format,
         match_score=result.match_report.overall_score,
@@ -213,6 +311,9 @@ async def tailor(
         cover_letter_url=cover_url,
         warnings=result.warnings,
     )
+    resp = JSONResponse(content=body.model_dump())
+    resp.headers["X-Shared-Quota-Remaining"] = str(remaining_after)
+    return resp
 
 
 @app.post("/cover-letter", response_model=CoverLetterResponse)

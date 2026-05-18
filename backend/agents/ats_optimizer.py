@@ -32,7 +32,7 @@ def _contains(haystack_norm: str, needle: str) -> bool:
     return bool(re.search(pat, haystack_norm))
 
 
-def score(rewritten_text: str, jd: JDAnalysis) -> ATSScore:
+def score(rewritten_text: str, jd: JDAnalysis, *, llm: "LLM | None" = None) -> ATSScore:
     """Compute ATS keyword coverage of the rewritten resume against the JD."""
     haystack = _normalize(rewritten_text)
     keywords = list(dict.fromkeys(jd.keywords + jd.must_have_skills))
@@ -52,7 +52,7 @@ def score(rewritten_text: str, jd: JDAnalysis) -> ATSScore:
 
     suggestions: List[str] = []
     if missing:
-        suggestions = _suggest(missing, jd)
+        suggestions = _suggest(missing, jd, llm=llm)
 
     return ATSScore(
         keyword_coverage=round(coverage, 3),
@@ -74,11 +74,12 @@ SUGGEST_SYSTEM = (
 )
 
 
-def _suggest(missing: List[str], jd: JDAnalysis) -> List[str]:
-    try:
-        llm = LLM(fast=True)
-    except Exception:
-        return [f"Consider surfacing '{kw}' if you have relevant experience." for kw in missing[:5]]
+def _suggest(missing: List[str], jd: JDAnalysis, *, llm: "LLM | None" = None) -> List[str]:
+    if llm is None:
+        try:
+            llm = LLM(fast=True)
+        except Exception:
+            return [f"Consider surfacing '{kw}' if you have relevant experience." for kw in missing[:5]]
 
     user = f"Missing keywords: {missing}\n\nJD analysis:\n{jd.model_dump_json(indent=2)}\n"
     try:

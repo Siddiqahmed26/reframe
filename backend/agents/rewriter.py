@@ -112,6 +112,8 @@ def rewrite(
     match_report: MatchReport,
     paragraphs: List[ResumeParagraph],
     length_hints: Optional[Dict[int, int]] = None,
+    *,
+    llm: "LLM | None" = None,
 ) -> RewriteResult:
     """Rewrite resume bullets to align with the JD.
 
@@ -124,7 +126,8 @@ def rewrite(
     if not targets:
         return RewriteResult()
 
-    llm = LLM()
+    if llm is None:
+        llm = LLM()
     all_instructions: List[RewriteInstruction] = []
     budgets: Dict[int, int] = {p.index: _budget_for(p, (length_hints or {}).get(p.index)) for p in targets}
 

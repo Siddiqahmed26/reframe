@@ -44,7 +44,7 @@ Other rules:
 """
 
 
-def match(jd: JDAnalysis, resume: ResumeAnalysis) -> MatchReport:
+def match(jd: JDAnalysis, resume: ResumeAnalysis, *, llm: "LLM | None" = None) -> MatchReport:
     # Trim the resume payload to the fields the matcher actually needs.
     # Excluding `paragraphs` (positional, can be huge) keeps us under
     # Groq's per-request token cap that was 413-ing on content-rich resumes.
@@ -57,7 +57,8 @@ def match(jd: JDAnalysis, resume: ResumeAnalysis) -> MatchReport:
 Candidate resume analysis:
 {_compact_json(trimmed_resume)}
 """
-    llm = LLM()
+    if llm is None:
+        llm = LLM()
     data = llm.complete_json(system=SYSTEM, user=user, max_tokens=2500)
     if not isinstance(data, dict):
         return MatchReport()

@@ -30,6 +30,7 @@ from backend.agents import (
     resume_analyzer,
     rewriter,
 )
+from backend.agents.llm import LLM
 from backend.models import (
     ATSScore,
     JDAnalysis,
@@ -86,6 +87,7 @@ def run_pipeline(
     output_path: Union[str, Path],
     want_cover_letter: bool = False,
     cover_letter_pdf_path: Optional[Union[str, Path]] = None,
+    llm_override: Optional[LLM] = None,
 ) -> PipelineResult:
     """Run the full pipeline. Input may be .docx or .pdf; output format
     matches the input.
@@ -126,20 +128,20 @@ def run_pipeline(
         full_text = parsed_docx.full_text
 
     logger.info("Analyzing JD")
-    jd = jd_analyzer.analyze(jd_text)
+    jd = jd_analyzer.analyze(jd_text, llm=llm_override)
 
     logger.info("Analyzing resume")
-    resume = resume_analyzer.analyze(full_text, heuristic=heuristic)
+    resume = resume_analyzer.analyze(full_text, heuristic=heuristic, llm=llm_override)
     resume.paragraphs = paragraphs  # LLM doesn't have indices
 
     logger.info("Running matcher")
-    match_report = matcher.match(jd, resume)
+    match_report = matcher.match(jd, resume, llm=llm_override)
 
     logger.info("Running rewriter (length_hints=%s)", "yes" if length_hints else "no")
-    rewrites = rewriter.rewrite(jd, resume, match_report, paragraphs, length_hints=length_hints)
+    rewrites = rewriter.rewrite(jd, resume, match_report, paragraphs, length_hints=length_hints, llm=llm_override)
 
     rewritten_text = _rewritten_text_for_ats(paragraphs, rewrites)
-    ats = ats_optimizer.score(rewritten_text, jd)
+    ats = ats_optimizer.score(rewritten_text, jd, llm=llm_override)
     logger.info("Initial ATS coverage: %.2f", ats.keyword_coverage)
 
     if ats.keyword_coverage < ATS_THRESHOLD and ats.missing_keywords:
@@ -158,7 +160,7 @@ def run_pipeline(
             ],
             notes="",
         )
-        pass2 = rewriter.rewrite(jd, resume, boosted, paragraphs, length_hints=length_hints)
+        pass2 = rewriter.rewrite(jd, resume, boosted, paragraphs, length_hints=length_hints, llm=llm_override)
 
         # CRITICAL: pass 2 is ADDITIVE, not a replacement. If pass 2 fails or
         # returns nothing, we MUST keep pass 1's work. A pass 2 instruction
@@ -174,7 +176,7 @@ def run_pipeline(
         from backend.models import RewriteResult as _RewriteResult
         rewrites = _RewriteResult(instructions=list(merged_by_idx.values()))
         rewritten_text = _rewritten_text_for_ats(paragraphs, rewrites)
-        ats = ats_optimizer.score(rewritten_text, jd)
+        ats = ats_optimizer.score(rewritten_text, jd, llm=llm_override)
         logger.info(
             "Post-rewrite ATS coverage: %.2f (merged: %d pass-1 + %d pass-2 additions = %d total)",
             ats.keyword_coverage,
@@ -201,7 +203,7 @@ def run_pipeline(
     if want_cover_letter:
         logger.info("Generating cover letter")
         try:
-            cover_text = cover_letter_agent.generate(jd, resume)
+            cover_text = cover_letter_agent.generate(jd, resume, llm=llm_override)
         except Exception:
             logger.exception("Cover letter generation failed")
             cover_text = None
