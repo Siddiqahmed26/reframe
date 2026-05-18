@@ -1,0 +1,1999 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>reframe. Reframe your resume for any role.</title>
+  <meta name="description" content="Reframe your resume for any role. A multi-agent pipeline rewrites your bullets to match the job description, in the exact same layout you spent hours formatting." />
+  <!-- When this file is hosted somewhere other than the API (e.g. Vercel mirror),
+       set the content attribute to the API origin, like https://you-reframe.hf.space.
+       Empty / missing = same-origin (default, used on the HF Space). -->
+  <meta name="reframe-api" content="" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%235be8c5'/%3E%3Ctext x='16' y='23' font-family='Georgia,serif' font-size='20' font-weight='400' font-style='italic' text-anchor='middle' fill='%230a0f1e'%3Er%3C/text%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0a0f1e;
+      --bg-2: #0e1426;
+      --text: #e8ecf7;
+      --muted: #9aa4c7;
+      --dim: rgba(255,255,255,0.45);
+      --accent: #5be8c5;
+      --accent-2: #6b8afd;
+      --amber: #ffb84d;
+      --pink: #ff6b8a;
+      --serif: 'Instrument Serif', Georgia, serif;
+      --sans: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: 16px;
+      line-height: 1.55;
+      overflow-x: hidden;
+      letter-spacing: -0.005em;
+    }
+    a { color: inherit; text-decoration: none; }
+    button { font-family: inherit; }
+
+    /* fixed 3D canvas behind everything */
+    .scene {
+      position: fixed; inset: 0;
+      width: 100%; height: 100%;
+      z-index: 0;
+      pointer-events: none;
+    }
+    .vignette {
+      position: fixed; inset: 0; z-index: 1; pointer-events: none;
+      background: linear-gradient(180deg,
+        rgba(10,15,30,0.0) 0%,
+        rgba(10,15,30,0.55) 50%,
+        rgba(10,15,30,0.0) 100%);
+    }
+    main, nav, footer { position: relative; z-index: 2; }
+
+    /* ── glass utility ── */
+    .glass {
+      background: rgba(10,15,30,0.55);
+      backdrop-filter: blur(14px) saturate(120%);
+      -webkit-backdrop-filter: blur(14px) saturate(120%);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 20px;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 24px 60px rgba(0,0,0,0.35);
+    }
+
+    /* nav */
+    nav.top {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 50;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 18px 28px;
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      background: rgba(10,15,30,0.55);
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+    }
+    .brand {
+      display: flex; align-items: center; gap: 12px;
+    }
+    .brand-mark {
+      width: 28px; height: 28px; border-radius: 8px;
+      background: var(--accent);
+      display: grid; place-items: center;
+      color: var(--bg);
+      font-family: var(--serif);
+      font-size: 22px;
+      font-style: italic;
+      line-height: 1;
+      padding-bottom: 2px;
+    }
+    .wordmark {
+      font-family: var(--serif);
+      font-weight: 400;
+      font-size: clamp(1.1rem, 4vw, 1.625rem);
+      letter-spacing: -0.01em;
+      line-height: 1;
+    }
+    .brand { text-decoration: none; color: inherit; }
+    .nav-links {
+      display: flex; gap: 24px; font-size: 14px; color: var(--muted);
+    }
+    .nav-links a:hover { color: var(--text); }
+    @media (max-width: 640px) { .nav-links { display: none; } }
+
+    /* hero */
+    .hero {
+      min-height: 100vh;
+      display: flex; align-items: center; justify-content: center;
+      padding: 120px 24px 80px;
+      text-align: center;
+    }
+    .hero-inner {
+      max-width: 720px;
+      padding: 48px 44px 44px;
+      border-radius: 24px;
+      background: rgba(10,15,30,0.58);
+      backdrop-filter: blur(14px) saturate(120%);
+      -webkit-backdrop-filter: blur(14px) saturate(120%);
+      border: 1px solid rgba(255,255,255,0.06);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 24px 80px rgba(0,0,0,0.45);
+    }
+    @media (max-width: 560px) {
+      .hero-inner { padding: 32px 24px; border-radius: 18px; }
+    }
+    .hero-eyebrow {
+      display: inline-flex; align-items: center; gap: 8px;
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--accent);
+      text-transform: uppercase;
+      letter-spacing: 0.2em;
+      padding: 6px 14px;
+      border: 1px solid rgba(91,232,197,0.35);
+      border-radius: 999px;
+      background: rgba(91,232,197,0.05);
+      margin-bottom: 30px;
+    }
+    .hero-eyebrow .dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 10px var(--accent);
+      animation: pulse 2.4s ease-in-out infinite;
+    }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+    h1.hero-title {
+      font-family: var(--serif);
+      font-weight: 400;
+      font-size: clamp(48px, 9vw, 120px);
+      line-height: 0.98;
+      letter-spacing: -0.02em;
+      margin: 0 0 22px;
+    }
+    h1.hero-title em {
+      font-style: italic;
+      color: var(--accent);
+    }
+    p.hero-sub {
+      font-size: clamp(15px, 1.45vw, 19px);
+      color: var(--muted);
+      max-width: 60ch;
+      margin: 0 auto 40px;
+    }
+    .cta-row { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+    .btn-primary {
+      display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+      padding: 14px 28px;
+      min-height: 48px; min-width: 48px;
+      font-size: 15px; font-weight: 600;
+      color: var(--bg);
+      background: var(--accent);
+      border: none; border-radius: 999px;
+      cursor: pointer;
+      transition: transform 0.2s, box-shadow 0.3s, filter 0.2s;
+      box-shadow: 0 8px 30px rgba(91,232,197,0.28);
+    }
+    .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 16px 50px rgba(91,232,197,0.4); filter: brightness(1.08); }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
+    .btn-ghost {
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      padding: 14px 24px;
+      min-height: 48px;
+      font-size: 14px; font-weight: 500;
+      color: var(--text);
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 999px;
+      cursor: pointer;
+      transition: background 0.2s, border-color 0.2s, color 0.2s;
+    }
+    .btn-ghost:hover { background: rgba(91,232,197,0.06); border-color: rgba(91,232,197,0.4); color: var(--accent); }
+
+    .scroll-cue {
+      position: absolute; bottom: 36px; left: 50%; transform: translateX(-50%);
+      font-family: var(--mono);
+      font-size: 10px; letter-spacing: 0.3em; text-transform: uppercase;
+      color: var(--dim);
+      display: flex; flex-direction: column; align-items: center; gap: 6px;
+      animation: bob 2.2s ease-in-out infinite;
+    }
+    @keyframes bob { 0%,100% { transform: translate(-50%, 0); opacity: 0.5; } 50% { transform: translate(-50%, 8px); opacity: 1; } }
+
+    /* narrative section that drives the 3D scene */
+    .narrative {
+      height: 500vh;
+      position: relative;
+    }
+    .narrative-sticky {
+      position: sticky; top: 0;
+      height: 100vh;
+      display: flex; flex-direction: column; justify-content: flex-end;
+      padding: 0 24px 60px;
+      pointer-events: none;
+    }
+    .narrative-overlay {
+      max-width: 1200px;
+      margin: 0 auto;
+      width: 100%;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      align-items: end;
+      gap: 40px;
+    }
+    .narrative-step {
+      display: flex; flex-direction: column; gap: 12px;
+      max-width: 480px;
+      opacity: 0;
+      transform: translateY(20px);
+      transition: opacity 0.6s ease, transform 0.6s ease;
+      background: rgba(10,15,30,0.62);
+      backdrop-filter: blur(14px) saturate(120%);
+      -webkit-backdrop-filter: blur(14px) saturate(120%);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 18px;
+      padding: 22px 26px;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 20px 50px rgba(0,0,0,0.35);
+      pointer-events: auto;
+    }
+    .narrative-step.is-active { opacity: 1; transform: translateY(0); }
+    .step-tag {
+      display: inline-flex; align-items: center; gap: 10px;
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--accent);
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+    }
+    .step-tag .num {
+      display: inline-grid; place-items: center;
+      width: 28px; height: 28px; border-radius: 8px;
+      background: rgba(91,232,197,0.1);
+      border: 1px solid rgba(91,232,197,0.4);
+      color: var(--accent); font-size: 12px; font-weight: 700;
+      font-family: var(--mono);
+    }
+    .step-head {
+      font-family: var(--serif);
+      font-weight: 400;
+      font-size: clamp(28px, 4vw, 44px);
+      line-height: 1.05;
+      letter-spacing: -0.01em;
+      color: var(--text);
+    }
+    .step-head em { font-style: italic; color: var(--accent); }
+    .step-body {
+      font-size: 15px;
+      color: var(--muted);
+      line-height: 1.55;
+    }
+    .narrative-progress {
+      max-width: 1200px;
+      margin: 18px auto 0;
+      width: 100%;
+      display: flex; gap: 6px;
+    }
+    .narrative-progress .seg {
+      flex: 1;
+      height: 2px;
+      background: rgba(255,255,255,0.08);
+      border-radius: 2px;
+      overflow: hidden;
+      position: relative;
+    }
+    .narrative-progress .seg .fill {
+      position: absolute; inset: 0;
+      background: var(--accent);
+      transform-origin: left;
+      transform: scaleX(0);
+    }
+    @media (max-width: 760px) {
+      .narrative { height: 380vh; }
+      .narrative-overlay { grid-template-columns: 1fr; }
+      .narrative-sticky { padding-bottom: 30px; }
+    }
+
+    /* common section */
+    section { padding: 100px 24px; }
+    .container { max-width: 1100px; margin: 0 auto; }
+    .eyebrow {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--accent);
+      text-transform: uppercase;
+      letter-spacing: 0.22em;
+      margin-bottom: 14px;
+    }
+    h2.section-title {
+      font-family: var(--serif);
+      font-weight: 400;
+      font-size: clamp(34px, 5vw, 56px);
+      letter-spacing: -0.02em;
+      line-height: 1.02;
+      margin: 0 0 18px;
+    }
+    h2.section-title em { font-style: italic; color: var(--accent); }
+    p.section-sub {
+      color: var(--muted);
+      font-size: 17px;
+      max-width: 60ch;
+      margin: 0 0 50px;
+    }
+
+    /* agents */
+    .agent-grid {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px;
+    }
+    @media (max-width: 767px) { .agent-grid { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 480px) { .agent-grid { grid-template-columns: 1fr; } }
+    .agent-card {
+      background: rgba(10,15,30,0.55);
+      backdrop-filter: blur(14px) saturate(120%);
+      -webkit-backdrop-filter: blur(14px) saturate(120%);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 18px;
+      padding: 26px 24px;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.04), 0 18px 40px rgba(0,0,0,0.3);
+      transition: transform 0.25s, border-color 0.25s, background 0.25s;
+    }
+    .agent-card:hover {
+      transform: translateY(-4px);
+      border-color: rgba(91,232,197,0.3);
+      background: linear-gradient(180deg, rgba(91,232,197,0.05), rgba(255,255,255,0.02));
+    }
+    .agent-icon {
+      width: 38px; height: 38px;
+      display: grid; place-items: center;
+      background: rgba(91,232,197,0.08);
+      border: 1px solid rgba(91,232,197,0.28);
+      border-radius: 10px;
+      margin-bottom: 18px;
+      color: var(--accent);
+    }
+    .agent-icon svg { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    .agent-tag {
+      font-family: var(--mono); font-size: 10px; color: var(--accent);
+      text-transform: uppercase; letter-spacing: 0.2em;
+      margin-bottom: 10px;
+    }
+    .agent-name { font-family: var(--serif); font-size: 22px; font-weight: 400; margin-bottom: 6px; }
+    .agent-desc { font-size: 14px; color: var(--muted); line-height: 1.55; }
+
+    /* upload */
+    .upload-card {
+      background: rgba(10,15,30,0.55);
+      backdrop-filter: blur(14px) saturate(120%);
+      -webkit-backdrop-filter: blur(14px) saturate(120%);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 22px;
+      padding: 36px 34px;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 24px 60px rgba(0,0,0,0.35);
+    }
+    .section-intro {
+      background: rgba(10,15,30,0.55);
+      backdrop-filter: blur(14px) saturate(120%);
+      -webkit-backdrop-filter: blur(14px) saturate(120%);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 20px;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 18px 50px rgba(0,0,0,0.3);
+      padding: 30px 34px;
+      margin-bottom: 36px;
+    }
+    .section-intro h2.section-title { margin-bottom: 12px; }
+    .section-intro p.section-sub { margin-bottom: 0; }
+    @media (max-width: 560px) { .upload-card { padding: 24px 22px; } }
+    .upload-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 26px;
+    }
+    @media (max-width: 760px) { .upload-grid { grid-template-columns: 1fr; } }
+    .field-label {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--dim);
+      text-transform: uppercase;
+      letter-spacing: 0.22em;
+      margin-bottom: 12px;
+      display: block;
+    }
+    .dropzone {
+      position: relative;
+      border: 1.5px dashed rgba(91,232,197,0.3);
+      border-radius: 16px;
+      background: rgba(91,232,197,0.02);
+      padding: 38px 20px;
+      text-align: center;
+      cursor: pointer;
+      min-height: 220px; min-width: 48px;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+      transition: border-color 0.2s, background 0.2s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .dropzone:hover, .dropzone.is-drag {
+      border-color: rgba(91,232,197,0.75);
+      background: rgba(91,232,197,0.05);
+    }
+    .dropzone input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+    .dz-text { font-size: 14px; color: var(--text); }
+    .dz-hint { font-size: 12px; color: var(--dim); font-family: var(--mono); }
+    .dz-filename { font-size: 12px; color: var(--accent); font-family: var(--mono); word-break: break-all; }
+    textarea {
+      width: 100%;
+      background: rgba(0,0,0,0.35);
+      border: 1px solid rgba(255,255,255,0.07);
+      border-radius: 14px;
+      padding: 14px 16px;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 14px;
+      line-height: 1.55;
+      resize: vertical;
+      min-height: 220px;
+    }
+    textarea:focus { outline: none; border-color: rgba(91,232,197,0.5); background: rgba(0,0,0,0.5); }
+    .upload-actions {
+      display: flex; align-items: center; flex-wrap: wrap; gap: 18px;
+      margin-top: 28px;
+    }
+    .switch { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; user-select: none; font-size: 14px; color: var(--muted); }
+    .switch input { display: none; }
+    .switch-track {
+      width: 36px; height: 20px; border-radius: 999px;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.1);
+      position: relative;
+      transition: background 0.2s;
+    }
+    .switch-track::after {
+      content: ''; position: absolute; top: 2px; left: 2px;
+      width: 14px; height: 14px; border-radius: 50%;
+      background: var(--muted);
+      transition: transform 0.2s, background 0.2s;
+    }
+    .switch input:checked + .switch-track { background: rgba(91,232,197,0.25); border-color: rgba(91,232,197,0.5); }
+    .switch input:checked + .switch-track::after { transform: translateX(16px); background: var(--accent); }
+
+    /* loader */
+    .loader {
+      position: fixed; inset: 0; z-index: 200;
+      background: rgba(10,15,30,0.88);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      display: none;
+      align-items: center; justify-content: center;
+      flex-direction: column;
+    }
+    .loader.is-on { display: flex; }
+    .loader-spin {
+      width: 64px; height: 64px;
+      border: 2px solid rgba(91,232,197,0.15);
+      border-top-color: var(--accent);
+      border-right-color: var(--accent-2);
+      border-radius: 50%;
+      animation: spin 1.2s linear infinite;
+      margin-bottom: 22px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loader-label { font-family: var(--mono); font-size: 11px; color: var(--accent); text-transform: uppercase; letter-spacing: 0.22em; margin-bottom: 8px; }
+    .loader-detail { color: var(--muted); font-size: 14px; max-width: 360px; text-align: center; padding: 0 20px; }
+
+    /* results */
+    #results { display: none; margin-top: 36px; }
+    .scores { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 24px; }
+    .score-box {
+      display: flex; align-items: baseline; gap: 10px;
+      padding: 14px 22px;
+      background: rgba(255,255,255,0.025);
+      border: 1px solid rgba(91,232,197,0.18);
+      border-radius: 14px;
+      backdrop-filter: blur(6px);
+    }
+    .score-num {
+      font-family: var(--serif);
+      font-size: 36px; font-weight: 400;
+      color: var(--accent);
+    }
+    .score-lbl { font-family: var(--mono); font-size: 10px; color: var(--dim); text-transform: uppercase; letter-spacing: 0.2em; }
+    .download-row { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 28px; }
+    .chip-cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; margin-top: 12px; }
+    @media (max-width: 700px) { .chip-cols { grid-template-columns: 1fr; } }
+    .chip-col .chip-head {
+      font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.22em;
+      display: flex; align-items: center; gap: 8px; margin-bottom: 10px; color: var(--dim);
+    }
+    .dot-pip { width: 6px; height: 6px; border-radius: 50%; }
+    .pip-good { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+    .pip-warn { background: var(--amber); box-shadow: 0 0 8px var(--amber); }
+    .pip-bad  { background: var(--pink); box-shadow: 0 0 8px var(--pink); }
+    .chip {
+      display: inline-block;
+      padding: 4px 11px; margin: 3px 4px 3px 0;
+      font-family: var(--mono); font-size: 12px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.03);
+      color: var(--muted);
+    }
+    .chip.good { color: var(--accent); border-color: rgba(91,232,197,0.35); background: rgba(91,232,197,0.06); }
+    .chip.warn { color: var(--amber); border-color: rgba(255,184,77,0.35); background: rgba(255,184,77,0.06); }
+    .chip.bad  { color: var(--pink);  border-color: rgba(255,107,138,0.35); background: rgba(255,107,138,0.06); }
+    .cl-card {
+      margin-top: 32px;
+      background: rgba(255,255,255,0.025);
+      border: 1px solid rgba(255,255,255,0.07);
+      border-radius: 16px;
+      padding: 28px;
+      backdrop-filter: blur(6px);
+    }
+    .cl-text {
+      font-family: var(--mono);
+      font-size: 13.5px;
+      line-height: 1.7;
+      white-space: pre-wrap;
+      color: #c8cce0;
+      margin: 0;
+    }
+    .cl-text .caret { display: inline-block; width: 7px; height: 1.1em; background: var(--accent); margin-left: 2px; transform: translateY(2px); animation: blink 1s steps(1) infinite; }
+    @keyframes blink { 50% { opacity: 0; } }
+
+    .toast {
+      position: fixed; bottom: 28px; left: 50%;
+      transform: translateX(-50%) translateY(60px);
+      padding: 12px 22px;
+      background: rgba(255,107,138,0.1);
+      border: 1px solid rgba(255,107,138,0.4);
+      color: #ffb0c0;
+      border-radius: 12px;
+      font-family: var(--mono); font-size: 13px;
+      backdrop-filter: blur(10px);
+      opacity: 0;
+      transition: opacity 0.3s, transform 0.3s;
+      z-index: 300;
+      max-width: 90vw;
+    }
+    .toast.is-on { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    footer {
+      padding: 60px 24px 70px;
+      text-align: center;
+      color: var(--dim);
+      font-size: 13px;
+    }
+    .footer-inner {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 32px 30px;
+      background: rgba(10,15,30,0.55);
+      backdrop-filter: blur(14px) saturate(120%);
+      -webkit-backdrop-filter: blur(14px) saturate(120%);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 20px;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 18px 50px rgba(0,0,0,0.3);
+    }
+    footer .wordmark { font-size: 22px; color: var(--text); display: inline-block; margin-bottom: 10px; }
+    .badge {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 5px 12px;
+      border: 1px solid rgba(91,232,197,0.25);
+      border-radius: 999px;
+      background: rgba(91,232,197,0.04);
+      color: var(--accent);
+      font-family: var(--mono); font-size: 11px;
+      margin-top: 14px;
+    }
+
+    .reveal { opacity: 0; transform: translateY(20px); transition: opacity 0.7s ease, transform 0.7s ease; }
+    .reveal.is-in { opacity: 1; transform: translateY(0); }
+
+    /* ── SM (481-767): large phones, small tablets portrait ── */
+    @media (max-width: 767px) {
+      nav.top { padding: 14px 20px; }
+      .nav-links { gap: 18px; font-size: 13px; }
+      .hero { padding: 110px 20px 60px; }
+      .hero-inner { max-width: 100%; padding: 36px 28px; border-radius: 18px; }
+      h1.hero-title { font-size: clamp(2.1rem, 8vw, 4.6rem); line-height: 1.02; }
+      p.hero-sub { font-size: 16px; line-height: 1.55; }
+      section { padding: 70px 20px; }
+      h2.section-title { font-size: clamp(1.6rem, 5vw, 2.4rem); }
+      p.section-sub { font-size: 16px; }
+      .section-intro { padding: 24px 24px; margin-bottom: 28px; }
+      .upload-card { padding: 28px 22px; }
+      .narrative-sticky { justify-content: flex-start; padding: 90px 20px 20px; }
+      .narrative-step { max-width: 100%; padding: 18px 22px; }
+      .step-head { font-size: clamp(1.4rem, 4.5vw, 2rem); }
+      .step-body { font-size: 15px; }
+      .agent-card { padding: 22px 20px; }
+      .footer-inner { padding: 28px 24px; }
+    }
+
+    /* ── XS (≤480): phones in portrait ── */
+    @media (max-width: 480px) {
+      nav.top { padding: 12px 16px; }
+      .brand-mark { width: 26px; height: 26px; font-size: 20px; }
+      .hero { padding: 96px 16px 48px; min-height: auto; }
+      .hero-inner {
+        max-width: 100%; padding: 24px 18px; border-radius: 14px;
+        backdrop-filter: blur(10px) saturate(120%);
+        -webkit-backdrop-filter: blur(10px) saturate(120%);
+      }
+      .hero-eyebrow { font-size: 10px; padding: 5px 12px; margin-bottom: 20px; }
+      h1.hero-title { font-size: clamp(2.1rem, 8vw, 4.6rem); margin-bottom: 16px; }
+      p.hero-sub { font-size: 16px; margin-bottom: 26px; }
+      .cta-row { flex-direction: column; gap: 10px; align-items: stretch; }
+      .btn-primary, .btn-ghost { width: 100%; }
+      section { padding: 56px 16px; }
+      h2.section-title { font-size: clamp(1.6rem, 6vw, 2.2rem); }
+      p.section-sub { font-size: 15px; margin-bottom: 32px; }
+      .section-intro {
+        padding: 20px 18px; border-radius: 14px;
+        backdrop-filter: blur(10px) saturate(120%);
+        -webkit-backdrop-filter: blur(10px) saturate(120%);
+      }
+      .narrative { height: 320vh; }
+      .narrative-sticky { justify-content: flex-start; padding: 80px 16px 20px; }
+      .narrative-step {
+        max-width: 100%; padding: 16px 18px; border-radius: 14px;
+        backdrop-filter: blur(10px) saturate(120%);
+        -webkit-backdrop-filter: blur(10px) saturate(120%);
+      }
+      .step-head { font-size: clamp(1.3rem, 5vw, 1.8rem); }
+      .step-body { font-size: 14.5px; line-height: 1.55; }
+      .upload-card {
+        padding: 22px 18px; border-radius: 16px;
+        backdrop-filter: blur(10px) saturate(120%);
+        -webkit-backdrop-filter: blur(10px) saturate(120%);
+      }
+      .upload-grid { gap: 22px; }
+      .dropzone { padding: 28px 16px; min-height: 180px; }
+      textarea { min-height: 180px; }
+      .upload-actions { flex-direction: column; align-items: stretch; gap: 14px; }
+      .upload-actions .btn-primary { width: 100%; }
+      .agent-card {
+        padding: 20px 18px; border-radius: 14px;
+        backdrop-filter: blur(10px) saturate(120%);
+        -webkit-backdrop-filter: blur(10px) saturate(120%);
+      }
+      .score-num { font-size: 30px; }
+      .score-box { padding: 12px 16px; }
+      .footer-inner {
+        padding: 22px 18px; border-radius: 14px;
+        backdrop-filter: blur(10px) saturate(120%);
+        -webkit-backdrop-filter: blur(10px) saturate(120%);
+      }
+      .scroll-cue { display: none; }
+    }
+
+    /* ── lock placeholder contrast for WCAG AA on dark glass ── */
+    textarea::placeholder { color: rgba(232,236,247,0.55); font-weight: 400; }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation: none !important; transition: none !important; }
+      html { scroll-behavior: auto; }
+      .narrative { height: 100vh; }
+      .narrative-sticky { position: static; height: auto; padding: 60px 24px; }
+      .narrative-step { opacity: 1; transform: none; }
+      .reveal { opacity: 1; transform: none; }
+      .scroll-cue { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <canvas class="scene" id="scene"></canvas>
+  <div class="vignette"></div>
+
+  <nav class="top">
+    <a href="#" class="brand" aria-label="reframe home">
+      <div class="brand-mark" aria-hidden="true">r</div>
+      <span class="wordmark">reframe</span>
+    </a>
+    <div class="nav-links">
+      <a href="#how">How it works</a>
+      <a href="#agents">The system</a>
+      <a href="#upload">Try it</a>
+    </div>
+  </nav>
+
+  <main>
+    <section class="hero">
+      <div class="hero-inner">
+        <div class="hero-eyebrow"><span class="dot"></span> multi-agent pipeline. format-preserving. truthful.</div>
+        <h1 class="hero-title">reframe your <em>resume</em><br/>for any role.</h1>
+        <p class="hero-sub">Upload your resume, paste a job description. A multi-agent pipeline reads the JD, finds the gaps, and rewrites your bullets to surface the exact words that role asks for. Same fonts, same layout, only the words inside the bullets change.</p>
+        <div class="cta-row">
+          <button class="btn-primary" aria-label="Jump to the resume upload form" onclick="document.getElementById('upload').scrollIntoView({behavior:'smooth'})">
+            Reframe my resume
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+          </button>
+          <a href="#how" class="btn-ghost">See how it works</a>
+        </div>
+      </div>
+      <div class="scroll-cue"><span>scroll</span><span>↓</span></div>
+    </section>
+
+    <div class="narrative" id="how">
+      <div class="narrative-sticky">
+        <div class="narrative-overlay">
+          <div class="narrative-step" data-step="0">
+            <div class="step-tag"><span class="num">01</span> extraction</div>
+            <div class="step-head">Reads the JD. <em>Pulls every keyword.</em></div>
+            <div class="step-body">The system tokenizes the posting into the exact skills, tools, and seniority signals an ATS would scan for. Each token detaches from the JD page and stages between the two documents.</div>
+          </div>
+          <div class="narrative-step" data-step="1">
+            <div class="step-tag"><span class="num">02</span> matching</div>
+            <div class="step-head">Maps tokens to <em>your bullets.</em></div>
+            <div class="step-body">Each JD requirement is routed to the bullet that already covers it, or flagged as a gap. Covered bullets glow. Missing keywords are queued for the rewrite pass.</div>
+          </div>
+          <div class="narrative-step" data-step="2">
+            <div class="step-tag"><span class="num">03</span> rewriting</div>
+            <div class="step-head">Rewrites the words. <em>Keeps the layout.</em></div>
+            <div class="step-body">Each weak bullet is rewritten in place to surface the JD's vocabulary. Truthful. Never invents numbers or experience. The page itself, fonts, sizes, margins, bullet markers, does not move.</div>
+          </div>
+          <div class="narrative-step" data-step="3">
+            <div class="step-tag"><span class="num">04</span> delivery</div>
+            <div class="step-head">Returns it. <em>Pixel for pixel.</em></div>
+            <div class="step-body">The tailored resume comes back as a .docx or .pdf in the exact same visual format you spent hours getting right. Optionally with a matched cover letter.</div>
+          </div>
+        </div>
+        <div class="narrative-progress">
+          <div class="seg"><div class="fill" data-seg="0"></div></div>
+          <div class="seg"><div class="fill" data-seg="1"></div></div>
+          <div class="seg"><div class="fill" data-seg="2"></div></div>
+          <div class="seg"><div class="fill" data-seg="3"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <section id="agents">
+      <div class="container">
+        <div class="reveal section-intro">
+          <div class="eyebrow">// six specialists</div>
+          <h2 class="section-title">One orchestrator. <em>Six specialists.</em></h2>
+          <p class="section-sub">Each agent does one thing well. The orchestrator runs them in sequence, then a format-preserving writer puts the new words back exactly where the old ones lived.</p>
+        </div>
+        <div class="agent-grid">
+          <div class="agent-card reveal">
+            <div class="agent-icon"><svg viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h10"/></svg></div>
+            <div class="agent-tag">01 · JD Reader</div>
+            <div class="agent-name">Reads the JD.</div>
+            <div class="agent-desc">Pulls required skills, seniority, and ATS keywords from the posting.</div>
+          </div>
+          <div class="agent-card reveal">
+            <div class="agent-icon"><svg viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 9h6M9 13h6M9 17h3"/></svg></div>
+            <div class="agent-tag">02 · Parser</div>
+            <div class="agent-name">Reads your resume.</div>
+            <div class="agent-desc">Identifies sections, bullets, contact info, and the candidate's actual story.</div>
+          </div>
+          <div class="agent-card reveal">
+            <div class="agent-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M3 12h6M15 12h6M12 3v6M12 15v6"/></svg></div>
+            <div class="agent-tag">03 · Matcher</div>
+            <div class="agent-name">Finds the gaps.</div>
+            <div class="agent-desc">Maps what you have to what the JD wants. Covered, weak, or missing.</div>
+          </div>
+          <div class="agent-card reveal">
+            <div class="agent-icon"><svg viewBox="0 0 24 24"><path d="M14 4l6 6-10 10H4v-6z"/></svg></div>
+            <div class="agent-tag">04 · Rewriter</div>
+            <div class="agent-name">Rewrites bullets.</div>
+            <div class="agent-desc">Surfaces JD vocabulary in your existing claims, truthfully, never fabricating.</div>
+          </div>
+          <div class="agent-card reveal">
+            <div class="agent-icon"><svg viewBox="0 0 24 24"><path d="M3 12l4 4L21 6"/><circle cx="12" cy="12" r="9"/></svg></div>
+            <div class="agent-tag">05 · ATS Scorer</div>
+            <div class="agent-name">Scores it.</div>
+            <div class="agent-desc">Computes keyword coverage and flags terms still missing for ATS systems.</div>
+          </div>
+          <div class="agent-card reveal">
+            <div class="agent-icon"><svg viewBox="0 0 24 24"><polyline points="22 6 12 13 2 6"/><rect x="2" y="4" width="20" height="16" rx="2"/></svg></div>
+            <div class="agent-tag">06 · Cover Letter</div>
+            <div class="agent-name">Drafts the letter.</div>
+            <div class="agent-desc">Writes a matched cover letter using the resume, JD, and the gaps the matcher found.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="upload">
+      <div class="container">
+        <div class="reveal section-intro">
+          <div class="eyebrow">// live. step one</div>
+          <h2 class="section-title">Drop in. <em>Paste the JD.</em></h2>
+          <p class="section-sub">PDF or DOCX. The pipeline returns the same file in the same format, with the same fonts and layout. Only the bullet text changes.</p>
+        </div>
+        <form id="f" class="upload-card reveal">
+          <div class="upload-grid">
+            <div>
+              <label class="field-label">Resume. pdf or docx</label>
+              <label class="dropzone" id="dz">
+                <input id="resume" type="file" accept=".pdf,.docx" required />
+                <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#5be8c5" stroke-width="1.4"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M12 18v-6M9 15l3-3 3 3"/></svg>
+                <div class="dz-text" id="dz-text">Click to browse or drop your file</div>
+                <div class="dz-hint">.pdf  ·  .docx  ·  max 10 MB</div>
+                <div class="dz-filename" id="dz-file"></div>
+              </label>
+            </div>
+            <div>
+              <label class="field-label">Job description</label>
+              <textarea id="jd" placeholder="Paste the full job description here. Responsibilities, requirements, qualifications."></textarea>
+            </div>
+          </div>
+          <div class="upload-actions">
+            <button type="submit" class="btn-primary" id="go">
+              Reframe my resume
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
+            </button>
+            <label class="switch">
+              <input type="checkbox" id="cover" checked />
+              <span class="switch-track"></span>
+              <span>Also generate a cover letter</span>
+            </label>
+          </div>
+        </form>
+
+        <div id="results">
+          <div class="scores">
+            <div class="score-box"><span class="score-num" id="match-num">0%</span><span class="score-lbl">match</span></div>
+            <div class="score-box"><span class="score-num" id="ats-num">0%</span><span class="score-lbl">ats coverage</span></div>
+          </div>
+          <div class="download-row">
+            <a id="dl-resume" class="btn-primary" href="#" download>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              <span id="dl-resume-text">Download resume</span>
+            </a>
+            <a id="dl-cl" class="btn-ghost" href="#" download style="display:none">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 6 12 13 2 6"/><rect x="2" y="4" width="20" height="16" rx="2"/></svg>
+              Download cover letter
+            </a>
+          </div>
+          <div class="chip-cols">
+            <div class="chip-col">
+              <div class="chip-head"><span class="dot-pip pip-good"></span>covered</div>
+              <div id="covered"></div>
+            </div>
+            <div class="chip-col">
+              <div class="chip-head"><span class="dot-pip pip-warn"></span>needs emphasis</div>
+              <div id="weak"></div>
+            </div>
+            <div class="chip-col">
+              <div class="chip-head"><span class="dot-pip pip-bad"></span>missing</div>
+              <div id="missing"></div>
+            </div>
+          </div>
+          <div id="cl-wrap" class="cl-card" style="display:none">
+            <div class="eyebrow" style="margin-bottom:14px">// cover letter</div>
+            <pre class="cl-text" id="cl-text"></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="footer-inner">
+      <div class="wordmark">reframe</div>
+      <div>Built with a stubborn refusal to use the same boring bullets again.</div>
+      <div class="badge" id="model-badge">checking provider...</div>
+    </div>
+  </footer>
+
+  <div class="loader" id="loader">
+    <div class="loader-spin"></div>
+    <div class="loader-label" id="loader-label">Reading resume</div>
+    <div class="loader-detail" id="loader-detail">Extracting text, fonts, and layout.</div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script>
+  (function () {
+    // Resolve the API base. Empty meta = same-origin. When deployed to a static
+    // host like Vercel that points at a separate API (e.g. the HF Space), set
+    // <meta name="reframe-api" content="https://..."> in the document.
+    const _apiMeta = document.querySelector('meta[name="reframe-api"]');
+    const API_BASE = (_apiMeta && _apiMeta.getAttribute('content') || '').replace(/\/$/, '');
+    const apiUrl = (path) => API_BASE + path;
+
+    const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const isXS = matchMedia('(max-width: 480px)').matches;
+    const isSM = !isXS && matchMedia('(max-width: 767px)').matches;
+    const isMD = !isXS && !isSM && matchMedia('(max-width: 1023px)').matches;
+    const isSmall = isXS || isSM;                  // legacy alias used downstream
+    const isVerySmall = matchMedia('(max-width: 380px)').matches;
+    const hasFinePointer = matchMedia('(hover: hover) and (pointer: fine)').matches;
+    let isPortrait = innerHeight > innerWidth;
+
+    // ────────── 3D scene ──────────
+    const canvas = document.getElementById('scene');
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+    // Pixel ratio: 1.25 on XS/SM to save GPU, 1.5 on MD/LG.
+    const PIXEL_RATIO_CAP = (isXS || isSM) ? 1.25 : 1.5;
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, PIXEL_RATIO_CAP));
+    renderer.setClearColor(0x000000, 0);
+
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.Fog(0x0a0f1e, 8, 24);
+
+    const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.1, 100);
+    camera.position.set(0, 0, 6);
+    camera.lookAt(0, 0, 0);
+
+    function resize() {
+      const w = innerWidth, h = innerHeight;
+      renderer.setSize(w, h, false);
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+      isPortrait = h > w;
+    }
+    resize();
+    addEventListener('resize', resize);
+
+    // ────────── document panels ──────────
+    const DOC_W = 3, DOC_H = 4, DOC_D = 0.06;
+    const TEX_W = 1024, TEX_H = Math.round(TEX_W * (DOC_H / DOC_W));
+
+    function makeDocCanvas() {
+      const c = document.createElement('canvas');
+      c.width = TEX_W; c.height = TEX_H;
+      return c;
+    }
+
+    // LEFT_DOC (resume) state
+    const leftCanvas = makeDocCanvas();
+    const leftCtx = leftCanvas.getContext('2d');
+    const leftTex = new THREE.CanvasTexture(leftCanvas);
+    leftTex.anisotropy = 4;
+
+    // RIGHT_DOC (JD) state
+    const rightCanvas = makeDocCanvas();
+    const rightCtx = rightCanvas.getContext('2d');
+    const rightTex = new THREE.CanvasTexture(rightCanvas);
+    rightTex.anisotropy = 4;
+
+    const docGeom = new THREE.BoxGeometry(DOC_W, DOC_H, DOC_D);
+
+    function makeDoc(tex, x) {
+      const sideMat = new THREE.MeshBasicMaterial({ color: 0x1a2240 });
+      const faceMat = new THREE.MeshBasicMaterial({ map: tex });
+      // 6 materials for BoxGeometry sides: +x, -x, +y, -y, +z, -z
+      const mats = [sideMat, sideMat, sideMat, sideMat, faceMat, sideMat.clone()];
+      const m = new THREE.Mesh(docGeom, mats);
+      m.position.set(x, 0, 0);
+      return m;
+    }
+    const leftDoc = makeDoc(leftTex, -2.5);
+    const rightDoc = makeDoc(rightTex, 2.5);
+    // make doc faces dimmable
+    [leftDoc, rightDoc].forEach(d => d.material.forEach(m => { m.transparent = true; m.opacity = 1; }));
+    scene.add(leftDoc, rightDoc);
+
+    // soft glow plane behind each doc
+    function makeGlow(x, color) {
+      const geom = new THREE.PlaneGeometry(DOC_W * 1.6, DOC_H * 1.4);
+      const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.18, depthWrite: false, blending: THREE.AdditiveBlending });
+      mat.userData.baseOpacity = 0.18;
+      const m = new THREE.Mesh(geom, mat);
+      m.position.set(x, 0, -0.4);
+      return m;
+    }
+    const leftGlow = makeGlow(-2.5, 0x5be8c5);
+    const rightGlow = makeGlow(2.5, 0x6b8afd);
+    scene.add(leftGlow, rightGlow);
+
+    // ────────── keyword tokens ──────────
+    const KEYWORDS = ['Python', 'Kubernetes', 'distributed systems', 'team leadership', 'ML', 'AWS', 'CI/CD', 'Postgres'];
+    // each token has a "home" position on the right doc (in doc-local coords)
+    // and a "stage" position floating between the docs
+    const tokenObjs = [];
+    function makeTokenSprite(text) {
+      const c = document.createElement('canvas');
+      c.width = 512; c.height = 128;
+      const cx = c.getContext('2d');
+      // rounded rect background
+      const r = 24;
+      cx.fillStyle = 'rgba(91,232,197,0.18)';
+      cx.strokeStyle = 'rgba(91,232,197,0.85)';
+      cx.lineWidth = 3;
+      cx.beginPath();
+      cx.moveTo(r, 0); cx.lineTo(c.width - r, 0);
+      cx.quadraticCurveTo(c.width, 0, c.width, r);
+      cx.lineTo(c.width, c.height - r);
+      cx.quadraticCurveTo(c.width, c.height, c.width - r, c.height);
+      cx.lineTo(r, c.height);
+      cx.quadraticCurveTo(0, c.height, 0, c.height - r);
+      cx.lineTo(0, r);
+      cx.quadraticCurveTo(0, 0, r, 0);
+      cx.closePath();
+      cx.fill(); cx.stroke();
+      cx.fillStyle = '#5be8c5';
+      cx.textAlign = 'center';
+      cx.textBaseline = 'middle';
+      cx.font = '600 56px Inter, sans-serif';
+      cx.fillText(text, c.width / 2, c.height / 2 + 4);
+      const tex = new THREE.CanvasTexture(c);
+      tex.anisotropy = 4;
+      const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false });
+      const sp = new THREE.Sprite(mat);
+      sp.scale.set(1.1, 0.27, 1);
+      return sp;
+    }
+
+    // home positions inside right doc (local x,y on doc face) - normalized -1..1
+    const tokenHomes = [
+      { rx: -0.55, ry: 0.20 },  // Python
+      { rx:  0.20, ry: 0.20 },  // Kubernetes
+      { rx: -0.40, ry: 0.02 },  // distributed systems
+      { rx:  0.30, ry: 0.02 },  // team leadership
+      { rx: -0.55, ry: -0.16 }, // ML
+      { rx: -0.15, ry: -0.16 }, // AWS
+      { rx:  0.25, ry: -0.16 }, // CI/CD
+      { rx:  0.00, ry: -0.34 }, // Postgres
+    ];
+    // staging positions between the docs
+    const tokenStages = tokenHomes.map((_, i) => ({
+      x: (-1 + Math.random() * 2) * 0.7,
+      y: (i / 7) * 2.0 - 1.0,
+    }));
+
+    KEYWORDS.forEach((kw, i) => {
+      const sp = makeTokenSprite(kw);
+      // start position: on the right doc
+      const home = tokenHomes[i];
+      sp.userData.idx = i;
+      sp.userData.detached = 0; // 0..1
+      sp.userData.matched = 0;
+      sp.position.set(2.5 + home.rx * (DOC_W / 2), home.ry * (DOC_H / 2), DOC_D / 2 + 0.01);
+      sp.material.opacity = 0;
+      scene.add(sp);
+      tokenObjs.push(sp);
+    });
+
+    // ────────── match beams ──────────
+    const BULLET_Y = [0.18, 0.02, -0.14, -0.30]; // 4 bullets, normalized -1..1 on left doc
+    // mapping: which keyword highlights which bullet
+    const TOKEN_TO_BULLET = [0, 0, 0, 1, 3, 2, 3, 2]; // bullet index per token
+
+    const beamMeshes = tokenObjs.map((_, i) => {
+      const geom = new THREE.BufferGeometry();
+      const SEG = 24;
+      const positions = new Float32Array(SEG * 3);
+      geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      geom.setDrawRange(0, 0);
+      const mat = new THREE.LineBasicMaterial({ color: 0x5be8c5, transparent: true, opacity: 0.6 });
+      const line = new THREE.Line(geom, mat);
+      line.userData.SEG = SEG;
+      scene.add(line);
+      return line;
+    });
+
+    function updateBeam(line, tokenWorldPos, bulletIdx, prog) {
+      const SEG = line.userData.SEG;
+      const arr = line.geometry.attributes.position.array;
+      // Beam endpoint = bullet position on the live leftDoc (works for any orientation).
+      const ldx = leftDoc.position.x;
+      const ldy = leftDoc.position.y;
+      const bx = ldx;
+      const by = ldy + BULLET_Y[bulletIdx] * (DOC_H / 2) * cur.docScale;
+      const bz = DOC_D / 2 + 0.02 + leftDoc.position.z;
+      const mid = new THREE.Vector3(
+        (tokenWorldPos.x + bx) / 2,
+        (tokenWorldPos.y + by) / 2 + 0.5,
+        (tokenWorldPos.z + bz) / 2 + 0.5
+      );
+      const approachX = bx + (tokenWorldPos.x > bx ? 1.0 : -1.0);
+      const curve = new THREE.CatmullRomCurve3([
+        tokenWorldPos.clone(),
+        mid,
+        new THREE.Vector3(approachX, by, bz),
+        new THREE.Vector3(bx, by, bz),
+      ]);
+      const pts = curve.getPoints(SEG - 1);
+      for (let i = 0; i < SEG; i++) {
+        arr[i * 3]     = pts[i].x;
+        arr[i * 3 + 1] = pts[i].y;
+        arr[i * 3 + 2] = pts[i].z;
+      }
+      line.geometry.attributes.position.needsUpdate = true;
+      const drawn = Math.floor(SEG * Math.max(0, Math.min(1, prog)));
+      line.geometry.setDrawRange(0, drawn);
+      line.material.opacity = 0.55 * Math.max(0, Math.min(1, prog));
+    }
+
+    // ────────── agent nodes (orbital) ──────────
+    const AGENT_NAMES = ['JD Reader', 'Parser', 'Matcher', 'Rewriter', 'ATS', 'Cover Letter'];
+    const agentGroup = new THREE.Group();
+    const agentNodes = AGENT_NAMES.map((name, i) => {
+      const sphereGeom = new THREE.SphereGeometry(0.08, 16, 16);
+      const sphereMat = new THREE.MeshBasicMaterial({ color: 0x5be8c5, transparent: true, opacity: 0.85 });
+      const sphere = new THREE.Mesh(sphereGeom, sphereMat);
+      // label
+      const c = document.createElement('canvas');
+      c.width = 256; c.height = 64;
+      const cx = c.getContext('2d');
+      cx.fillStyle = 'rgba(232,236,247,0.85)';
+      cx.font = '500 28px Inter, sans-serif';
+      cx.textAlign = 'center'; cx.textBaseline = 'middle';
+      cx.fillText(name, c.width / 2, c.height / 2);
+      const tex = new THREE.CanvasTexture(c);
+      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0.6, depthWrite: false }));
+      sp.scale.set(0.9, 0.22, 1);
+      sp.position.y = -0.18;
+
+      const grp = new THREE.Group();
+      grp.add(sphere); grp.add(sp);
+      grp.userData = { angle: (i / AGENT_NAMES.length) * Math.PI * 2, radius: 5.5 + (i % 2) * 0.6, ySpread: (i - 2.5) * 0.4, sphereMat };
+      agentGroup.add(grp);
+      return grp;
+    });
+    agentGroup.position.z = -3;
+    scene.add(agentGroup);
+
+    // ────────── particle field ──────────
+    // XS = 60, SM = 100, MD/LG = 200. May be halved once at runtime if frame
+    // budget blows past 25ms for 2+ seconds.
+    let PARTICLE_COUNT = isXS ? 60 : (isSM ? 100 : 200);
+    const PARTICLE_MAX = PARTICLE_COUNT;
+    const particleGeom = new THREE.BufferGeometry();
+    const pPos = new Float32Array(PARTICLE_MAX * 3);
+    const pCol = new Float32Array(PARTICLE_MAX * 3);
+    const c1 = new THREE.Color(0x5be8c5), c2 = new THREE.Color(0x6b8afd);
+    for (let i = 0; i < PARTICLE_COUNT; i++) {
+      pPos[i * 3]     = (Math.random() - 0.5) * 18;
+      pPos[i * 3 + 1] = (Math.random() - 0.5) * 12;
+      pPos[i * 3 + 2] = (Math.random() - 0.5) * 10 - 2;
+      const pick = Math.random() < 0.6 ? c1 : c2;
+      pCol[i * 3] = pick.r; pCol[i * 3 + 1] = pick.g; pCol[i * 3 + 2] = pick.b;
+    }
+    particleGeom.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
+    particleGeom.setAttribute('color', new THREE.BufferAttribute(pCol, 3));
+    particleGeom.setDrawRange(0, PARTICLE_COUNT);
+    const particleMat = new THREE.PointsMaterial({
+      size: 0.06, vertexColors: true, transparent: true, opacity: 0.85,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    const particles = new THREE.Points(particleGeom, particleMat);
+    scene.add(particles);
+
+    // Agent label visibility cap: XS=3, SM=4, MD/LG=6.
+    const AGENT_LABEL_LIMIT = isXS ? 3 : (isSM ? 4 : 6);
+    agentNodes.forEach((grp, i) => {
+      if (i >= AGENT_LABEL_LIMIT) {
+        const labelSprite = grp.children[1];
+        if (labelSprite) labelSprite.visible = false;
+      }
+    });
+
+    // ────────── doc canvas drawing ──────────
+    // Resume bullets: original & target text
+    const BULLETS = [
+      {
+        orig: 'Built backend services in python for a fintech, scaling to 2M users.',
+        tgt:  'Built distributed python backend services for a fintech on aws, scaling to 2M users.'
+      },
+      {
+        orig: 'Led a team of 4 engineers shipping a payments product in 6 months.',
+        tgt:  'Led team leadership across 4 engineers, shipping a payments product on kubernetes in 6 months.'
+      },
+      {
+        orig: 'Designed apis for mobile clients and improved response times.',
+        tgt:  'Designed mobile apis on postgres, owning ci/cd to improve response times 40%.'
+      },
+      {
+        orig: 'Wrote tests and shipped features with the team weekly.',
+        tgt:  'Shipped ml-backed features weekly with hardened ci/cd and review gates.'
+      }
+    ];
+
+    // pre-strip token state on the JD canvas: which tokens are "extracted" (drawn faded with strikethrough)
+    const tokenExtracted = new Array(KEYWORDS.length).fill(0); // 0..1 each
+
+    function drawRightDoc() {
+      const ctx = rightCtx;
+      const W = TEX_W, H = TEX_H;
+      ctx.fillStyle = '#f5f3ec';
+      ctx.fillRect(0, 0, W, H);
+
+      // header band
+      ctx.fillStyle = '#0a0f1e';
+      ctx.fillRect(0, 0, W, 110);
+
+      // title
+      ctx.fillStyle = '#f5f3ec';
+      ctx.font = '500 38px Inter, sans-serif';
+      ctx.fillText('JOB DESCRIPTION', 48, 72);
+      ctx.font = '400 22px Inter, sans-serif';
+      ctx.fillStyle = '#9aa4c7';
+      ctx.fillText('senior software engineer', 48, 100);
+
+      // body paragraph with highlighted tokens
+      ctx.fillStyle = '#1a1a24';
+      ctx.font = '400 30px Inter, sans-serif';
+      const lineH = 46;
+      const xPad = 56;
+      const yStart = 200;
+      const text = [
+        ['We are hiring a senior engineer with strong ', null],
+        ['Python', 0],
+        [' skills to scale our ', null],
+        ['distributed systems', 2],
+        [' on ', null],
+        ['Kubernetes', 1],
+        ['. You will provide ', null],
+        ['team leadership', 3],
+        [' to 4 engineers, ship', null],
+      ];
+      const text2 = [
+        ['production ', null],
+        ['ML', 4],
+        [' features on ', null],
+        ['AWS', 5],
+        [', own ', null],
+        ['CI/CD', 6],
+        [' pipelines, and tune ', null],
+        ['Postgres', 7],
+        [' queries for latency.', null],
+      ];
+
+      function drawTokenizedLine(tokens, y) {
+        let x = xPad;
+        for (const [word, kid] of tokens) {
+          const tw = ctx.measureText(word).width;
+          if (kid !== null) {
+            // highlight rectangle behind the token
+            const ext = tokenExtracted[kid];
+            const bg = `rgba(91,232,197,${0.35 * (1 - ext * 0.7)})`;
+            ctx.fillStyle = bg;
+            ctx.fillRect(x - 4, y - 32, tw + 8, 40);
+            // text or faded
+            ctx.fillStyle = ext > 0.95 ? 'rgba(26,26,36,0.25)' : '#1a1a24';
+            ctx.fillText(word, x, y);
+            // strikethrough when extracted
+            if (ext > 0.05) {
+              ctx.strokeStyle = `rgba(26,26,36,${0.6 * ext})`;
+              ctx.lineWidth = 3;
+              ctx.beginPath();
+              ctx.moveTo(x - 2, y - 12);
+              ctx.lineTo(x + tw + 2, y - 12);
+              ctx.stroke();
+            }
+          } else {
+            ctx.fillStyle = '#1a1a24';
+            ctx.fillText(word, x, y);
+          }
+          x += tw;
+        }
+      }
+      drawTokenizedLine(text,  yStart);
+      drawTokenizedLine(text2, yStart + lineH * 3);
+
+      // bottom lines
+      ctx.fillStyle = '#cfcec6';
+      for (let i = 0; i < 6; i++) {
+        ctx.fillRect(xPad, 600 + i * 50, W - xPad * 2, 6);
+      }
+      ctx.fillRect(xPad, 600 + 6 * 50, (W - xPad * 2) * 0.6, 6);
+
+      rightTex.needsUpdate = true;
+    }
+
+    // bullet text mutation state (smoothed in-frame)
+    const bulletProg = [0, 0, 0, 0]; // 0..1 each
+    const bulletGlow = [0, 0, 0, 0]; // 0..1 each
+
+    function drawLeftDoc() {
+      const ctx = leftCtx;
+      const W = TEX_W, H = TEX_H;
+      ctx.fillStyle = '#f5f3ec';
+      ctx.fillRect(0, 0, W, H);
+
+      // header band
+      ctx.fillStyle = '#0a0f1e';
+      ctx.fillRect(0, 0, W, 110);
+
+      // name
+      ctx.fillStyle = '#f5f3ec';
+      ctx.font = '400 44px "Instrument Serif", Georgia, serif';
+      ctx.fillText('ALEX CHEN', 48, 72);
+      ctx.font = '400 22px Inter, sans-serif';
+      ctx.fillStyle = '#9aa4c7';
+      ctx.fillText('senior software engineer · remote', 48, 100);
+
+      // contact line
+      ctx.fillStyle = '#8a8a92';
+      ctx.font = '400 20px Inter, sans-serif';
+      ctx.fillText('alex@chen.dev · github.com/alexc · linkedin.com/in/alexc', 48, 158);
+
+      // experience heading
+      ctx.fillStyle = '#1a1a24';
+      ctx.font = '600 24px Inter, sans-serif';
+      ctx.fillText('EXPERIENCE', 48, 226);
+      ctx.strokeStyle = '#cfcec6';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(48, 240); ctx.lineTo(W - 48, 240); ctx.stroke();
+
+      // role line
+      ctx.fillStyle = '#1a1a24';
+      ctx.font = '600 22px Inter, sans-serif';
+      ctx.fillText('Software Engineer · FintechCo', 48, 282);
+      ctx.font = '400 18px Inter, sans-serif';
+      ctx.fillStyle = '#666';
+      ctx.fillText('Jan 2022 to Present', 48, 308);
+
+      // bullets
+      const bulletY = [360, 460, 560, 660];
+      ctx.font = '400 26px Inter, sans-serif';
+      const baseFill = '#1a1a24';
+
+      for (let i = 0; i < BULLETS.length; i++) {
+        const y = bulletY[i];
+        // glow behind bullet
+        if (bulletGlow[i] > 0.01) {
+          ctx.fillStyle = `rgba(91,232,197,${0.18 * bulletGlow[i]})`;
+          ctx.fillRect(40, y - 34, W - 80, 56);
+        }
+        // bullet marker
+        ctx.fillStyle = bulletGlow[i] > 0.05 ? '#0e6b54' : '#1a1a24';
+        ctx.beginPath();
+        ctx.arc(58, y - 9, 5, 0, Math.PI * 2);
+        ctx.fill();
+        // bullet text, character-by-character morph
+        drawBulletText(ctx, 80, y, BULLETS[i].orig, BULLETS[i].tgt, bulletProg[i], baseFill);
+      }
+
+      // education heading
+      ctx.fillStyle = '#1a1a24';
+      ctx.font = '600 24px Inter, sans-serif';
+      ctx.fillText('EDUCATION', 48, 800);
+      ctx.strokeStyle = '#cfcec6';
+      ctx.beginPath();
+      ctx.moveTo(48, 814); ctx.lineTo(W - 48, 814); ctx.stroke();
+
+      ctx.fillStyle = '#1a1a24';
+      ctx.font = '400 22px Inter, sans-serif';
+      ctx.fillText('B.S. Computer Science · State University', 48, 854);
+      ctx.font = '400 18px Inter, sans-serif';
+      ctx.fillStyle = '#666';
+      ctx.fillText('2017 to 2021', 48, 882);
+
+      // skills section
+      ctx.fillStyle = '#1a1a24';
+      ctx.font = '600 24px Inter, sans-serif';
+      ctx.fillText('SKILLS', 48, 950);
+      ctx.strokeStyle = '#cfcec6';
+      ctx.beginPath();
+      ctx.moveTo(48, 964); ctx.lineTo(W - 48, 964); ctx.stroke();
+
+      ctx.font = '400 22px Inter, sans-serif';
+      ctx.fillText('python · postgresql · docker · react · linux', 48, 1004);
+      ctx.fillText('rest apis · graphql · pytest · git', 48, 1036);
+
+      leftTex.needsUpdate = true;
+    }
+
+    function drawBulletText(ctx, x0, y, orig, tgt, prog, color) {
+      const len = Math.max(orig.length, tgt.length);
+      const charProg = prog * len;
+      let dx = x0;
+      ctx.textBaseline = 'alphabetic';
+      for (let i = 0; i < len; i++) {
+        const t = Math.max(0, Math.min(1, charProg - i));
+        const oc = orig[i] || '';
+        const nc = tgt[i] || '';
+        if (t <= 0) {
+          ctx.fillStyle = color;
+          ctx.globalAlpha = 1;
+          ctx.fillText(oc, dx, y);
+          dx += ctx.measureText(oc).width;
+        } else if (t >= 1) {
+          ctx.fillStyle = color;
+          ctx.globalAlpha = 1;
+          ctx.fillText(nc, dx, y);
+          dx += ctx.measureText(nc).width;
+        } else {
+          const w1 = ctx.measureText(oc).width;
+          const w2 = ctx.measureText(nc).width;
+          // fade old down
+          if (oc) {
+            ctx.globalAlpha = 1 - t;
+            ctx.fillStyle = color;
+            ctx.fillText(oc, dx, y + t * 10);
+          }
+          // fade new in from above
+          if (nc) {
+            ctx.globalAlpha = t;
+            ctx.fillStyle = color;
+            ctx.fillText(nc, dx, y - (1 - t) * 10);
+          }
+          ctx.globalAlpha = 1;
+          dx += w1 * (1 - t) + w2 * t;
+        }
+      }
+    }
+
+    // initial draw
+    drawLeftDoc();
+    drawRightDoc();
+
+    // ────────── scroll choreography ──────────
+    // band state, smoothed per-frame
+    const target = {
+      camX: 0, camY: 0, camZ: 6,
+      lookX: 0, lookY: 0, lookZ: 0,
+      leftBob: 0, rightBob: 0,
+      tokenDetach: new Array(8).fill(0),
+      tokenStage: new Array(8).fill(0),  // 0=at home, 1=at stage, 2=at bullet
+      bulletProg: [0,0,0,0],
+      bulletGlow: [0,0,0,0],
+      beamProg: new Array(8).fill(0),
+      agentPulse: [0,0,0,0,0,0],
+      deliverPulse: 0,
+      sceneIntensity: 0.35,
+      leftPos:  { x: -3.6, y: 0, z: 0 },
+      rightPos: { x:  3.6, y: 0, z: 0 },
+      docScale: 1.0,
+    };
+    const cur = {
+      camX: 0, camY: 0, camZ: 6,
+      lookX: 0, lookY: 0, lookZ: 0,
+      tokenStage: new Array(8).fill(0),
+      beamProg: new Array(8).fill(0),
+      deliverPulse: 0,
+      sceneIntensity: 0.35,
+      leftPos:  { x: -3.6, y: 0, z: 0 },
+      rightPos: { x:  3.6, y: 0, z: 0 },
+      docScale: 1.0,
+    };
+
+    function clamp01(x) { return Math.max(0, Math.min(1, x)); }
+    function smoothstep(a, b, x) { const t = clamp01((x - a) / (b - a)); return t * t * (3 - 2 * t); }
+    function bandLocal(p, lo, hi) { return clamp01((p - lo) / (hi - lo)); }
+
+    function updateTargets(p) {
+      // Band A 0..0.15 hero
+      // Band B 0.15..0.35 extraction
+      // Band C 0.35..0.55 matching
+      // Band D 0.55..0.80 rewriting
+      // Band E 0.80..1.00 delivery
+      const bA = bandLocal(p, 0.00, 0.15);
+      const bB = bandLocal(p, 0.15, 0.35);
+      const bC = bandLocal(p, 0.35, 0.55);
+      const bD = bandLocal(p, 0.55, 0.80);
+      const bE = bandLocal(p, 0.80, 1.00);
+
+      // camera + doc placement, branched by orientation
+      if (isPortrait) {
+        // Portrait: docs stack vertically. LEFT on top (y=+1.2), RIGHT below (y=-1.2).
+        // In bands C/D, RIGHT drifts down/back to clear the view.
+        if (p < 0.15) {
+          // Band A hero
+          target.camX = 0; target.camY = 0; target.camZ = 6.5;
+          target.lookX = 0; target.lookY = 0;
+          target.leftPos  = { x: 0, y:  1.2, z: 0 };
+          target.rightPos = { x: 0, y: -1.2, z: 0 };
+        } else if (p < 0.35) {
+          // Band B extraction. Camera dollies in, docs stay stacked.
+          target.camX = 0; target.camY = 0; target.camZ = 6.5 - bB * 1.0;
+          target.lookX = 0; target.lookY = 0;
+          target.leftPos  = { x: 0, y:  1.2, z: 0 };
+          target.rightPos = { x: 0, y: -1.2, z: 0 };
+        } else if (p < 0.55) {
+          // Band C matching. Camera pans up toward LEFT, RIGHT slides down.
+          target.camX = 0; target.camY = 0.6 + bC * 0.4; target.camZ = 5.5;
+          target.lookX = 0; target.lookY = 1.0;
+          target.leftPos  = { x: 0, y:  1.2, z: 0 };
+          target.rightPos = { x: 0, y: -1.2 - bC * 1.4, z: -bC * 0.5 };
+        } else if (p < 0.80) {
+          // Band D rewriting. Camera close to LEFT, RIGHT further off.
+          target.camX = 0; target.camY = 1.0 + bD * 0.2; target.camZ = 4.6 - bD * 0.6;
+          target.lookX = 0; target.lookY = 1.2;
+          target.leftPos  = { x: 0, y:  1.2, z: 0 };
+          target.rightPos = { x: 0, y: -3.0, z: -1.0 };
+        } else {
+          // Band E delivery. Both recede in Z.
+          target.camX = 0; target.camY = 0.6 - bE * 0.4; target.camZ = 5.5 + bE * 1.5;
+          target.lookX = 0; target.lookY = 0.6 - bE * 0.6;
+          target.leftPos  = { x: 0, y:  1.2, z: -2.0 * bE };
+          target.rightPos = { x: 0, y: -1.2, z: -2.0 * bE };
+        }
+      } else {
+        // Landscape: original side-by-side layout.
+        if (p < 0.15) {
+          target.camX = 0; target.camY = 0; target.camZ = 6;
+          target.lookX = 0; target.lookY = 0;
+        } else if (p < 0.35) {
+          target.camX = 0; target.camY = 0; target.camZ = 6 - bB * 1.5;
+          target.lookX = 0; target.lookY = bB * 0.1;
+        } else if (p < 0.55) {
+          target.camX = bC * 1.5;
+          target.camY = 0.5 * bC;
+          target.camZ = 4.5;
+          target.lookX = -1.0 * bC;
+        } else if (p < 0.80) {
+          target.camX = -1.0 - bD * 1.0;
+          target.camY = 0.2;
+          target.camZ = 4.5 - bD * 1.0;
+          target.lookX = -2.5;
+        } else {
+          const ang = bE * Math.PI * 0.6;
+          target.camX = -2.5 + Math.sin(ang) * 1.5;
+          target.camY = 0.2;
+          target.camZ = 3.5 + bE * 2.5;
+          target.lookX = -2.5;
+        }
+        // Doc X separation: A wide for hero glass card, B/C/D centered, E pulled back.
+        if (p < 0.15) {
+          const s = smoothstep(0, 0.15, p);
+          const dx = 3.6 - s * 1.1;
+          target.leftPos  = { x: -dx, y: 0, z: 0 };
+          target.rightPos = { x:  dx, y: 0, z: 0 };
+        } else if (p < 0.80) {
+          target.leftPos  = { x: -2.5, y: 0, z: 0 };
+          target.rightPos = { x:  2.5, y: 0, z: 0 };
+        } else {
+          target.leftPos  = { x: -2.5, y: 0, z: -2.0 * bE };
+          target.rightPos = { x:  2.5, y: 0, z: -2.0 * bE };
+        }
+      }
+
+      // token detach + stage progress
+      for (let i = 0; i < 8; i++) {
+        // band B: detach one-by-one
+        const dLocal = clamp01((bB * 8 - i) / 0.9);
+        target.tokenDetach[i] = dLocal;
+        tokenExtracted[i] = dLocal;
+        // band C: stage->bullet
+        target.tokenStage[i] = bC; // 0 (home/staged) -> 1 (toward bullet)
+        // band E: tokens fade
+        if (bE > 0) {
+          target.tokenStage[i] = clamp01(target.tokenStage[i] + bE * 0.2);
+        }
+      }
+
+      // beams: draw progressively in band C, hold through D, fade in E
+      for (let i = 0; i < 8; i++) {
+        const bLocal = clamp01((bC * 8 - i) / 0.8);
+        let bp = bLocal;
+        if (p > 0.80) bp = clamp01(bp - bE * 1.5);
+        target.beamProg[i] = bp;
+      }
+
+      // bullet glow (during matching, brightens for each matched bullet)
+      for (let bi = 0; bi < 4; bi++) {
+        // glow turns on when at least one token has matched to this bullet
+        let anyMatched = 0;
+        for (let ki = 0; ki < 8; ki++) {
+          if (TOKEN_TO_BULLET[ki] === bi) anyMatched = Math.max(anyMatched, target.beamProg[ki]);
+        }
+        target.bulletGlow[bi] = anyMatched;
+      }
+
+      // bullet rewrite during band D, staggered
+      for (let bi = 0; bi < 4; bi++) {
+        const local = clamp01((bD - bi * 0.10) / 0.65);
+        target.bulletProg[bi] = local;
+      }
+
+      // delivery pulse in E
+      target.deliverPulse = Math.sin(bE * Math.PI);
+
+      // agent pulse in E
+      for (let i = 0; i < 6; i++) {
+        const ap = clamp01((bE * 6 - i) / 0.9);
+        target.agentPulse[i] = ap * (1 - bE * 0.3);
+      }
+
+      // scene intensity per band: A=0.35, B=0.95, C=1.0, D=1.0, E=0.30
+      let I;
+      if (p < 0.15) I = 0.35;
+      else if (p < 0.22) I = 0.35 + (0.95 - 0.35) * bandLocal(p, 0.15, 0.22);
+      else if (p < 0.55) I = 0.95 + (1.00 - 0.95) * bandLocal(p, 0.22, 0.55);
+      else if (p < 0.80) I = 1.00;
+      else I = 1.00 + (0.30 - 1.00) * bandLocal(p, 0.80, 0.92);
+      // Mobile readability: dial back so glass-card text always wins.
+      if (isXS) I *= 0.85;
+      else if (isSM) I *= 0.95;
+      if (isVerySmall) I = 0.30;
+      target.sceneIntensity = I;
+
+      // Doc scale: shrink in Band E for both orientations.
+      target.docScale = (p >= 0.80) ? (1.0 - 0.3 * bE) : 1.0;
+    }
+
+    function lerp(a, b, t) { return a + (b - a) * t; }
+    function lerpArr(a, b, t) { for (let i = 0; i < a.length; i++) a[i] = lerp(a[i], b[i], t); }
+
+    // narrative overlay
+    const stepEls = document.querySelectorAll('.narrative-step');
+    const segFills = document.querySelectorAll('.narrative-progress .fill');
+    function updateNarrative(p) {
+      // which step is "active" by p band
+      let activeIdx = 0;
+      if (p >= 0.15 && p < 0.35) activeIdx = 0;
+      else if (p < 0.55) activeIdx = 1;
+      else if (p < 0.80) activeIdx = 2;
+      else if (p >= 0.80) activeIdx = 3;
+      // hero band: no active narrative
+      if (p < 0.10) activeIdx = -1;
+      stepEls.forEach((el, i) => el.classList.toggle('is-active', i === activeIdx));
+      const ranges = [[0.15,0.35],[0.35,0.55],[0.55,0.80],[0.80,1.0]];
+      segFills.forEach((el, i) => {
+        const local = bandLocal(p, ranges[i][0], ranges[i][1]);
+        el.style.transform = `scaleX(${local})`;
+      });
+    }
+
+    // ────────── render loop ──────────
+    let lastP = -1;
+    let animDirty = true;
+    let running = true;
+    let t0 = performance.now();
+    // Frame budget watchdog: if frame time > 25ms for 2+ seconds, halve particles once.
+    let lastFrameMs = performance.now();
+    let slowSince = 0;
+    let particleHalved = false;
+
+    function getScrollProgress() {
+      const total = document.body.scrollHeight - innerHeight;
+      if (total <= 0) return 0;
+      return clamp01(scrollY / total);
+    }
+
+    function tick() {
+      if (!running) return;
+      requestAnimationFrame(tick);
+
+      // Frame budget check.
+      const now = performance.now();
+      const delta = now - lastFrameMs;
+      lastFrameMs = now;
+      if (!particleHalved) {
+        if (delta > 25) {
+          if (!slowSince) slowSince = now;
+          else if (now - slowSince > 2000) {
+            PARTICLE_COUNT = Math.max(20, Math.floor(PARTICLE_COUNT / 2));
+            particleGeom.setDrawRange(0, PARTICLE_COUNT);
+            particleHalved = true;
+            console.info('[reframe] frame budget exceeded, particles halved to', PARTICLE_COUNT);
+          }
+        } else {
+          slowSince = 0;
+        }
+      }
+
+      let p = getScrollProgress();
+      if (reduced) p = 0.55;
+
+      updateTargets(p);
+      updateNarrative(p);
+
+      const t = (now - t0) / 1000;
+
+      // smooth camera
+      const a = 0.1;
+      cur.camX = lerp(cur.camX, target.camX, a);
+      cur.camY = lerp(cur.camY, target.camY, a);
+      cur.camZ = lerp(cur.camZ, target.camZ, a);
+      cur.lookX = lerp(cur.lookX, target.lookX, a);
+      cur.lookY = lerp(cur.lookY, target.lookY, a);
+      camera.position.set(cur.camX, cur.camY, cur.camZ);
+      camera.lookAt(cur.lookX, cur.lookY, 0);
+
+      // smooth scene-wide values
+      cur.sceneIntensity = lerp(cur.sceneIntensity, target.sceneIntensity, 0.08);
+      cur.leftPos.x  = lerp(cur.leftPos.x,  target.leftPos.x,  0.08);
+      cur.leftPos.y  = lerp(cur.leftPos.y,  target.leftPos.y,  0.08);
+      cur.leftPos.z  = lerp(cur.leftPos.z,  target.leftPos.z,  0.08);
+      cur.rightPos.x = lerp(cur.rightPos.x, target.rightPos.x, 0.08);
+      cur.rightPos.y = lerp(cur.rightPos.y, target.rightPos.y, 0.08);
+      cur.rightPos.z = lerp(cur.rightPos.z, target.rightPos.z, 0.08);
+      cur.docScale = lerp(cur.docScale, target.docScale, 0.08);
+      const I = cur.sceneIntensity;
+
+      // Apply doc positions + idle bob/rotation.
+      leftDoc.position.x  = cur.leftPos.x;
+      leftDoc.position.z  = cur.leftPos.z;
+      leftDoc.position.y  = cur.leftPos.y + Math.sin(t * 0.5) * 0.05;
+      rightDoc.position.x = cur.rightPos.x;
+      rightDoc.position.z = cur.rightPos.z;
+      rightDoc.position.y = cur.rightPos.y + Math.sin(t * 0.5 + 1.2) * 0.05;
+      leftDoc.scale.setScalar(cur.docScale);
+      rightDoc.scale.setScalar(cur.docScale);
+      leftDoc.rotation.y = Math.sin(t * 0.3) * 0.03;
+      rightDoc.rotation.y = Math.sin(t * 0.3 + 1.0) * 0.03;
+      // Glow planes follow their docs.
+      leftGlow.position.x = cur.leftPos.x;
+      leftGlow.position.y = cur.leftPos.y;
+      leftGlow.position.z = cur.leftPos.z - 0.4;
+      rightGlow.position.x = cur.rightPos.x;
+      rightGlow.position.y = cur.rightPos.y;
+      rightGlow.position.z = cur.rightPos.z - 0.4;
+      leftGlow.scale.setScalar(cur.docScale);
+      rightGlow.scale.setScalar(cur.docScale);
+
+      // apply intensity to doc faces, particles, and ambient elements
+      leftDoc.material.forEach(m => m.opacity = I);
+      rightDoc.material.forEach(m => m.opacity = I);
+      particleMat.opacity = 0.85 * I;
+
+      // tokens. Positions track the live doc transforms so portrait works.
+      const halfW = (DOC_W / 2) * cur.docScale;
+      const halfH = (DOC_H / 2) * cur.docScale;
+      // staging line between the docs, in the direction perpendicular to their separation
+      const lpx = cur.leftPos.x, lpy = cur.leftPos.y;
+      const rpx = cur.rightPos.x, rpy = cur.rightPos.y;
+      const midX = (lpx + rpx) / 2, midY = (lpy + rpy) / 2;
+      const dx = rpx - lpx, dy = rpy - lpy;
+      const seg = Math.sqrt(dx*dx + dy*dy) || 1;
+      // unit vector along left->right
+      const ux = dx / seg, uy = dy / seg;
+      // perpendicular for jitter
+      const px_ = -uy, py_ = ux;
+      for (let i = 0; i < tokenObjs.length; i++) {
+        const sp = tokenObjs[i];
+        const home = tokenHomes[i];
+        const homeWorld = new THREE.Vector3(
+          rpx + home.rx * halfW,
+          rpy + home.ry * halfH,
+          DOC_D / 2 + 0.01 + cur.rightPos.z
+        );
+        // staged between docs, with per-token jitter perpendicular to the separation axis
+        const jitter = (i - 3.5) * 0.18;
+        const stageWorld = new THREE.Vector3(
+          midX - ux * 0.4 + px_ * jitter,
+          midY - uy * 0.4 + py_ * jitter,
+          0.3 + Math.sin(t + i) * 0.1
+        );
+        const bulletWorld = new THREE.Vector3(
+          lpx,
+          lpy + BULLET_Y[TOKEN_TO_BULLET[i]] * halfH,
+          DOC_D / 2 + 0.05 + cur.leftPos.z
+        );
+        // smooth state
+        cur.tokenStage[i] = lerp(cur.tokenStage[i], target.tokenStage[i], 0.08);
+        const det = target.tokenDetach[i];
+        // position lerps from home -> stage -> bullet based on stage progress
+        const blend1 = clamp01(det);              // 0=home, 1=at stage
+        const blend2 = clamp01(cur.tokenStage[i]); // 0=at stage, 1=at bullet
+        const p1 = new THREE.Vector3().lerpVectors(homeWorld, stageWorld, blend1);
+        const p2 = new THREE.Vector3().lerpVectors(p1, bulletWorld, blend2);
+        sp.position.copy(p2);
+        // opacity ramps in as it detaches, fades during late E
+        let op = blend1;
+        if (p > 0.85) op *= 1 - bandLocal(p, 0.85, 1.0);
+        sp.material.opacity = op * I;
+        sp.scale.set(1.1 - 0.2 * blend2, 0.27 - 0.04 * blend2, 1);
+      }
+
+      // beams
+      for (let i = 0; i < beamMeshes.length; i++) {
+        cur.beamProg[i] = lerp(cur.beamProg[i], target.beamProg[i], 0.1);
+        const sp = tokenObjs[i];
+        updateBeam(beamMeshes[i], sp.position, TOKEN_TO_BULLET[i], cur.beamProg[i]);
+        beamMeshes[i].material.opacity *= I;
+      }
+
+      // bullets canvas redraw (drives the rewrite + glow)
+      let needLeftRedraw = false;
+      for (let i = 0; i < 4; i++) {
+        const ns = lerp(bulletProg[i], target.bulletProg[i], 0.12);
+        if (Math.abs(ns - bulletProg[i]) > 0.001) needLeftRedraw = true;
+        bulletProg[i] = ns;
+        const ng = lerp(bulletGlow[i], target.bulletGlow[i], 0.12);
+        if (Math.abs(ng - bulletGlow[i]) > 0.001) needLeftRedraw = true;
+        bulletGlow[i] = ng;
+      }
+      // always redraw to keep ambient (lightweight)
+      if (needLeftRedraw || true) drawLeftDoc();
+
+      // right doc: redraw when extraction state changes
+      drawRightDoc();
+
+      // delivery pulse
+      cur.deliverPulse = lerp(cur.deliverPulse, target.deliverPulse, 0.08);
+      leftDoc.material[4].color.setRGB(1, 1, 1);
+      const glowAmt = cur.deliverPulse * 0.4;
+      leftGlow.material.opacity = (0.18 + glowAmt) * I;
+      rightGlow.material.opacity = 0.18 * I;
+
+      // agent nodes orbit. Brighten during E, dim with global intensity.
+      agentNodes.forEach((grp, i) => {
+        const ud = grp.userData;
+        ud.angle += 0.003;
+        grp.position.set(
+          Math.cos(ud.angle) * ud.radius,
+          ud.ySpread + Math.sin(t * 0.4 + i) * 0.15,
+          Math.sin(ud.angle) * ud.radius
+        );
+        const pulse = target.agentPulse[i];
+        ud.sphereMat.opacity = (0.4 + pulse * 0.6) * Math.max(I, 0.5);
+        const s = 1 + pulse * 0.4;
+        grp.children[0].scale.set(s, s, s);
+        grp.children[1].material.opacity = (0.3 + pulse * 0.5) * Math.max(I, 0.6);
+      });
+
+      // particles drift (PARTICLE_COUNT may be halved at runtime)
+      const arr = particleGeom.attributes.position.array;
+      for (let i = 0; i < PARTICLE_COUNT; i++) {
+        arr[i * 3 + 1] += 0.003;
+        if (arr[i * 3 + 1] > 6) arr[i * 3 + 1] = -6;
+      }
+      particleGeom.attributes.position.needsUpdate = true;
+      particleGeom.setDrawRange(0, PARTICLE_COUNT);
+
+      renderer.render(scene, camera);
+    }
+
+    document.addEventListener('visibilitychange', () => {
+      running = !document.hidden;
+      if (running) tick();
+    });
+    tick();
+
+    // ────────── form & UX ──────────
+    const dz = document.getElementById('dz');
+    const resumeInput = document.getElementById('resume');
+    const dzText = document.getElementById('dz-text');
+    const dzFile = document.getElementById('dz-file');
+    ['dragover', 'dragenter'].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.add('is-drag'); }));
+    ['dragleave', 'drop'].forEach(ev => dz.addEventListener(ev, () => dz.classList.remove('is-drag')));
+    dz.addEventListener('drop', (e) => {
+      e.preventDefault();
+      if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+        resumeInput.files = e.dataTransfer.files;
+        showFile();
+      }
+    });
+    resumeInput.addEventListener('change', showFile);
+    function showFile() {
+      const f = resumeInput.files[0];
+      if (!f) return;
+      dzText.textContent = 'File ready';
+      dzFile.textContent = `${f.name}  ·  ${Math.round(f.size/1024)} KB`;
+    }
+
+    const loader = document.getElementById('loader');
+    const loaderLabel = document.getElementById('loader-label');
+    const loaderDetail = document.getElementById('loader-detail');
+    const LOAD_STAGES = [
+      { at: 0,  label: 'Reading resume',         detail: 'Extracting text, fonts, and layout.' },
+      { at: 5,  label: 'Analyzing JD',            detail: 'Pulling required skills, keywords, seniority.' },
+      { at: 18, label: 'Matching requirements',   detail: 'Mapping what you have against what the JD asks.' },
+      { at: 38, label: 'Rewriting bullets',       detail: 'Surfacing JD vocabulary, truthfully. Longest step.' },
+      { at: 72, label: 'Writing tailored output', detail: 'Inserting rewrites with preserved formatting.' },
+    ];
+    let loadStart = 0, loadRaf = 0;
+    function startLoading() {
+      loader.classList.add('is-on');
+      loadStart = Date.now();
+      tickLoader();
+    }
+    function tickLoader() {
+      const t = (Date.now() - loadStart) / 1000;
+      let cur = LOAD_STAGES[0];
+      for (let i = LOAD_STAGES.length - 1; i >= 0; i--) if (t >= LOAD_STAGES[i].at) { cur = LOAD_STAGES[i]; break; }
+      loaderLabel.textContent = cur.label;
+      loaderDetail.textContent = cur.detail;
+      loadRaf = requestAnimationFrame(tickLoader);
+    }
+    function stopLoading() {
+      cancelAnimationFrame(loadRaf);
+      loader.classList.remove('is-on');
+    }
+
+    const toast = document.getElementById('toast');
+    function showToast(msg) {
+      toast.textContent = msg;
+      toast.classList.add('is-on');
+      setTimeout(() => toast.classList.remove('is-on'), 5500);
+    }
+
+    function renderChips(elId, items, klass) {
+      const el = document.getElementById(elId);
+      el.innerHTML = '';
+      if (!items || !items.length) {
+        el.innerHTML = '<span style="color:var(--dim);font-size:12px">no items</span>';
+        return;
+      }
+      items.forEach(it => {
+        const s = document.createElement('span');
+        s.className = 'chip ' + klass;
+        s.textContent = it;
+        el.appendChild(s);
+      });
+    }
+    function animateNum(el, to) {
+      const start = performance.now();
+      function step(t) {
+        const p = Math.min(1, (t - start) / 1100);
+        const eased = 1 - Math.pow(1 - p, 3);
+        el.textContent = Math.round(to * eased) + '%';
+        if (p < 1) requestAnimationFrame(step);
+      }
+      requestAnimationFrame(step);
+    }
+    function typewriter(el, text, speed) {
+      el.textContent = '';
+      let i = 0;
+      const caret = document.createElement('span');
+      caret.className = 'caret';
+      el.appendChild(caret);
+      function step() {
+        if (i >= text.length) { caret.remove(); return; }
+        caret.before(document.createTextNode(text[i]));
+        i++;
+        setTimeout(step, speed);
+      }
+      step();
+    }
+
+    const form = document.getElementById('f');
+    const goBtn = document.getElementById('go');
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const file = resumeInput.files[0];
+      const jdTxt = document.getElementById('jd').value.trim();
+      if (!file) return showToast('Pick a resume file first.');
+      if (!jdTxt) return showToast('Paste a job description first.');
+      const fd = new FormData();
+      fd.append('resume', file);
+      fd.append('jd', jdTxt);
+      fd.append('cover_letter', document.getElementById('cover').checked ? 'true' : 'false');
+      goBtn.disabled = true;
+      startLoading();
+      try {
+        const resp = await fetch(apiUrl('/tailor'), { method: 'POST', body: fd });
+        const ct = resp.headers.get('content-type') || '';
+        if (!resp.ok) {
+          const txt = ct.includes('application/json') ? (await resp.json()).detail : await resp.text();
+          throw new Error(typeof txt === 'string' ? txt : JSON.stringify(txt));
+        }
+        const data = await resp.json();
+        stopLoading();
+        const results = document.getElementById('results');
+        results.style.display = 'block';
+        results.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        animateNum(document.getElementById('match-num'), Math.round((data.match_score || 0) * 100));
+        animateNum(document.getElementById('ats-num'),   Math.round((data.ats_score?.keyword_coverage || 0) * 100));
+        const ext = (data.output_format || 'docx').toLowerCase();
+        document.getElementById('dl-resume').href = apiUrl(data.download_url);
+        document.getElementById('dl-resume-text').textContent = `Download resume (.${ext})`;
+        const dlCl = document.getElementById('dl-cl');
+        if (data.cover_letter_url) {
+          dlCl.href = apiUrl(data.cover_letter_url);
+          dlCl.style.display = 'inline-flex';
+        } else { dlCl.style.display = 'none'; }
+        renderChips('covered', data.match_report?.covered, 'good');
+        renderChips('weak',    data.match_report?.weakly_covered, 'warn');
+        renderChips('missing', data.match_report?.missing, 'bad');
+        if (data.cover_letter) {
+          document.getElementById('cl-wrap').style.display = 'block';
+          if (reduced) document.getElementById('cl-text').textContent = data.cover_letter;
+          else typewriter(document.getElementById('cl-text'), data.cover_letter, 12);
+        } else {
+          document.getElementById('cl-wrap').style.display = 'none';
+        }
+      } catch (err) {
+        stopLoading();
+        showToast(err.message || String(err));
+      } finally {
+        goBtn.disabled = false;
+      }
+    });
+
+    // reveal on scroll
+    const io = new IntersectionObserver((entries) => entries.forEach(e => {
+      if (e.isIntersecting) { e.target.classList.add('is-in'); io.unobserve(e.target); }
+    }), { threshold: 0.12 });
+    document.querySelectorAll('.reveal').forEach(el => io.observe(el));
+
+    // model badge
+    fetch(apiUrl('/health')).then(r => r.json()).then(d => {
+      const el = document.getElementById('model-badge');
+      if (d && d.model) el.textContent = `model. ${d.model}`;
+      else el.style.display = 'none';
+    }).catch(() => { document.getElementById('model-badge').style.display = 'none'; });
+  })();
+  </script>
+</body>
+</html>
