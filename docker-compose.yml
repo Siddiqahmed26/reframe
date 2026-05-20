@@ -3,6 +3,11 @@ services:
     build: .
     expose:
       - "8000"
+    # Host mapping so http://localhost:8000 reaches the api directly
+    # during dev. In production, caddy proxies via the docker network
+    # and external traffic only goes through 80/443.
+    ports:
+      - "8000:8000"
     env_file:
       - .env
     restart: unless-stopped

@@ -102,9 +102,103 @@ def parse_docx(path: str | Path) -> ParsedDocx:
                     rp, current_section = _classify_paragraph(para, composite_idx, current_section)
                     paragraphs.append(rp)
 
-    full_text = "\n".join(p.text for p in paragraphs if p.text)
+    # Smart line-join for `full_text`: certificate/education paragraphs are
+    # sometimes split by a soft line break that python-docx surfaces as two
+    # separate paragraphs. We merge them in the analysis text so the matcher
+    # and cover-letter agents see complete titles. The underlying
+    # `paragraphs` list (and its indices) is NOT mutated — the writer still
+    # needs stable indices for in-place rewriting.
+    full_text = _build_joined_full_text(paragraphs)
 
     return ParsedDocx(document=doc, paragraphs=paragraphs, full_text=full_text)
+
+
+# Words that look like a paragraph was split mid-sentence by a soft line break.
+_CONJUNCTION_TAILS = ("and", "&", "or", "of", "the", "with", "in", "for", "to", "a", "an")
+
+
+def _build_joined_full_text(paragraphs: List[ResumeParagraph]) -> str:
+    """Concatenate paragraph texts with newlines, but merge consecutive
+    paragraphs in the same section when the first ends with a conjunction
+    (and/or/of/the/&/...) or a comma AND the second starts with a lowercase
+    letter — the typical signature of an accidental soft-line-break split."""
+    lines: list[str] = []
+    prev_p: Optional[ResumeParagraph] = None
+    for p in paragraphs:
+        if not p.text:
+            prev_p = p
+            continue
+        if (
+            lines
+            and prev_p is not None
+            and prev_p.section == p.section
+            and _looks_like_split(prev_p.text, p.text)
+        ):
+            # Merge into the previous emitted line.
+            lines[-1] = lines[-1].rstrip(" ,;:") + " " + p.text.lstrip()
+        else:
+            lines.append(p.text)
+        prev_p = p
+    return "\n".join(lines)
+
+
+def _looks_like_split(prev_text: str, next_text: str) -> bool:
+    """Return True if `prev_text` looks like it was cut mid-clause and
+    `next_text` continues it."""
+    p = prev_text.rstrip()
+    if not p or not next_text:
+        return False
+    # Ends with a sentence terminator → not a split.
+    if p[-1] in ".!?":
+        return False
+    last_token = p.split()[-1].lower().rstrip(",;:")
+    ends_with_conjunction = (
+        last_token in _CONJUNCTION_TAILS
+        or p[-1] in ",;&"
+    )
+    if not ends_with_conjunction:
+        return False
+    # Next paragraph should start with a lowercase letter — uppercase would
+    # be a new sentence / heading, not a continuation.
+    first_char = next_text.lstrip()[:1]
+    return first_char.islower()
+
+
+def _balance_phone(raw: str) -> str:
+    """Tidy a phone number we just matched: balance parentheses, collapse
+    internal runs of whitespace, drop trailing punctuation.
+
+    Common breakage: the regex captures "+91) 9663908548" because the resume
+    has "(+91)" but the opening paren was outside the match window. We
+    detect orphaned parens and either close or strip them so we never ship
+    a stray ")" in the rendered contact strip.
+    """
+    s = (raw or "").strip()
+    if not s:
+        return ""
+    opens = s.count("(")
+    closes = s.count(")")
+    if opens > closes:
+        # Missing close paren — drop the open(s) entirely; the surrounding
+        # whitespace is usually fine on its own.
+        s = s.replace("(", "", opens - closes)
+    elif closes > opens:
+        # Orphan close paren. If the front of the string looks like
+        # "+CC " with a country code we know was meant to be parenthesized,
+        # restore the open paren. Otherwise strip the trailing close.
+        import re
+        m = re.match(r"\+(\d{1,3})\b", s)
+        if m and ")" in s and "(" not in s:
+            cc = m.group(1)
+            # Replace "+CC" with "(+CC)" at the start.
+            s = s.replace("+" + cc, "(+" + cc, 1)
+            # Leave the existing ")" in place; now parens balance.
+        else:
+            s = s.replace(")", "", closes - opens)
+    # Collapse any whitespace runs.
+    import re
+    s = re.sub(r"\s+", " ", s).strip(" ,;:.-")
+    return s
 
 
 def parsed_to_analysis(parsed: ParsedDocx) -> ResumeAnalysis:
@@ -118,22 +212,55 @@ def parsed_to_analysis(parsed: ParsedDocx) -> ResumeAnalysis:
             analysis.candidate_name = p.text
             break
 
-    # Simple contact extraction from the first ~5 paragraphs
+    # Simple contact extraction from the first ~8 paragraphs.
     import re
     head_text = "\n".join(p.text for p in parsed.paragraphs[:8])
+
     email_match = re.search(r"[\w.+-]+@[\w-]+\.[\w.-]+", head_text)
-    phone_match = re.search(r"(\+?\d[\d\s().-]{7,}\d)", head_text)
-    linkedin_match = re.search(r"(linkedin\.com/in/[\w-]+)", head_text, re.IGNORECASE)
-    github_match = re.search(r"(github\.com/[\w-]+)", head_text, re.IGNORECASE)
+
+    # Phone: handle plain, "(+91) 9663...", "+91-9663-...", and "(123) 456-7890"
+    # forms. The previous regex required the first char to be `\+?\d`, so a
+    # leading `(` got skipped and we captured "+91) 9663..." with a stray
+    # closing paren. New regex accepts an optional leading `(` and the rest
+    # of the number, then we balance any orphan parens in post-processing.
+    phone_match = re.search(
+        r"(\+?\(?\d{1,3}\)?[\s\-.]?\d[\d\s\-.()]{6,}\d)",
+        head_text,
+    )
+
+    # LinkedIn / GitHub: accept either a full URL ("linkedin.com/in/user"),
+    # a path-only form ("in/user", "gh/user"), or a bare handle on a line
+    # tagged with a host name.
+    linkedin_match = re.search(
+        r"linkedin\.com/(?:in/)?([\w.\-]+)",
+        head_text,
+        re.IGNORECASE,
+    )
+    github_match = re.search(
+        r"github\.com/([\w.\-]+)",
+        head_text,
+        re.IGNORECASE,
+    )
+
+    # Location: typical resumes put "City, State" or "City, Country" near
+    # the contact line. Match a comma-separated pair of capitalized tokens
+    # NOT containing digits or '@' (filters out address lines that have
+    # numbers).
+    location_match = re.search(
+        r"\b([A-Z][a-zA-Z]+(?:\s[A-Z][a-zA-Z]+)?,\s[A-Z][a-zA-Z]+(?:\s[A-Z][a-zA-Z]+)?)\b",
+        head_text,
+    )
 
     if email_match:
         analysis.contact["email"] = email_match.group(0)
     if phone_match:
-        analysis.contact["phone"] = phone_match.group(0).strip()
+        analysis.contact["phone"] = _balance_phone(phone_match.group(1).strip())
     if linkedin_match:
-        analysis.contact["linkedin"] = linkedin_match.group(0)
+        analysis.contact["linkedin"] = "linkedin.com/in/" + linkedin_match.group(1)
     if github_match:
-        analysis.contact["github"] = github_match.group(0)
+        analysis.contact["github"] = "github.com/" + github_match.group(1)
+    if location_match:
+        analysis.contact["location"] = location_match.group(1).strip()
 
     # Bucket paragraphs by section
     for p in parsed.paragraphs:

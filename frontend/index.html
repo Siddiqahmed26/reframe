@@ -438,13 +438,14 @@
       margin-top: 28px;
     }
     .switch { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; user-select: none; font-size: 14px; color: var(--muted); }
-    .switch input { display: none; }
+    .switch input { position: absolute; opacity: 0; pointer-events: none; width: 0; height: 0; }
     .switch-track {
       width: 36px; height: 20px; border-radius: 999px;
       background: rgba(255,255,255,0.08);
       border: 1px solid rgba(255,255,255,0.1);
       position: relative;
-      transition: background 0.2s;
+      transition: background 0.2s, border-color 0.2s, box-shadow 0.2s;
+      flex-shrink: 0;
     }
     .switch-track::after {
       content: ''; position: absolute; top: 2px; left: 2px;
@@ -452,8 +453,48 @@
       background: var(--muted);
       transition: transform 0.2s, background 0.2s;
     }
-    .switch input:checked + .switch-track { background: rgba(91,232,197,0.25); border-color: rgba(91,232,197,0.5); }
+    .switch input:checked + .switch-track { background: rgba(91,232,197,0.25); border-color: rgba(91,232,197,0.5); box-shadow: 0 0 0 4px rgba(91,232,197,0.08); }
     .switch input:checked + .switch-track::after { transform: translateX(16px); background: var(--accent); }
+    .switch input:focus-visible + .switch-track { box-shadow: 0 0 0 3px rgba(91,232,197,0.55); }
+
+    /* Output-mode toggle group (rewrite resume / generate cover letter) */
+    .mode-group {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px 18px;
+      margin-top: 24px;
+      padding: 14px 16px;
+      border-radius: 12px;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.06);
+    }
+    @media (max-width: 640px) {
+      .mode-group { grid-template-columns: 1fr; }
+    }
+    .switch-stack { align-items: flex-start; gap: 12px; }
+    .switch-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+    .switch-label { font-size: 14px; color: var(--ink, #e8edf4); font-weight: 500; }
+    .switch-sub { font-size: 12px; color: var(--dim, rgba(255,255,255,0.42)); line-height: 1.45; }
+    .mode-hint { font-size: 12px; color: var(--warn, #f7b96b); align-self: center; }
+    .btn-primary[disabled] { opacity: 0.45; cursor: not-allowed; box-shadow: none; }
+
+    /* Cover-letter card action row (download + copy) */
+    .cl-actions { display: flex; gap: 10px; align-items: center; margin-top: 16px; flex-wrap: wrap; }
+    .cl-actions .btn-icon {
+      background: transparent;
+      border: 1px solid rgba(255,255,255,0.12);
+      color: var(--muted);
+      padding: 8px 14px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 13px;
+      display: inline-flex; align-items: center; gap: 6px;
+      transition: border-color 0.15s, color 0.15s, background 0.15s;
+    }
+    .cl-actions .btn-icon:hover { border-color: rgba(91,232,197,0.5); color: var(--accent); background: rgba(91,232,197,0.05); }
+    .cl-actions .btn-icon:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .cl-actions .btn-icon-primary { border-color: rgba(91,232,197,0.55); color: var(--accent); background: rgba(91,232,197,0.08); }
+    .cl-actions .btn-icon-primary:hover { background: rgba(91,232,197,0.14); }
 
     /* loader */
     .loader {
@@ -1069,16 +1110,30 @@
               <textarea id="jd" placeholder="Paste the full job description here. Responsibilities, requirements, qualifications."></textarea>
             </div>
           </div>
+          <div class="mode-group" role="group" aria-label="Output mode">
+            <label class="switch switch-stack">
+              <input type="checkbox" id="opt-resume" checked aria-checked="true" />
+              <span class="switch-track"></span>
+              <span class="switch-body">
+                <span class="switch-label">Rewrite my resume</span>
+                <span class="switch-sub">Bullets get rewritten in place. Same fonts, same layout.</span>
+              </span>
+            </label>
+            <label class="switch switch-stack">
+              <input type="checkbox" id="opt-cover" aria-checked="false" />
+              <span class="switch-track"></span>
+              <span class="switch-body">
+                <span class="switch-label">Generate a cover letter</span>
+                <span class="switch-sub">A short letter tailored to this JD, downloadable as .docx.</span>
+              </span>
+            </label>
+          </div>
           <div class="upload-actions">
             <button type="submit" class="btn-primary" id="go">
-              Reframe my resume
+              <span id="go-label">Reframe my resume</span>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
             </button>
-            <label class="switch">
-              <input type="checkbox" id="cover" checked />
-              <span class="switch-track"></span>
-              <span>Also generate a cover letter</span>
-            </label>
+            <span class="mode-hint" id="mode-hint" hidden>Pick at least one output to continue.</span>
           </div>
           <button type="button" class="clear-key-link is-off" id="clear-key">Forget my saved key</button>
         </form>
@@ -1115,6 +1170,21 @@
           <div id="cl-wrap" class="cl-card" style="display:none">
             <div class="eyebrow" style="margin-bottom:14px">// cover letter</div>
             <pre class="cl-text" id="cl-text"></pre>
+            <div class="cl-actions">
+              <button type="button" class="btn-icon" id="cl-copy">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                Copy text
+              </button>
+              <button type="button" class="btn-icon btn-icon-primary" id="cl-download-docx">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                Download .docx
+              </button>
+              <button type="button" class="btn-icon" id="cl-download-pdf">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                Download .pdf
+              </button>
+              <a id="cl-anchor" hidden></a>
+            </div>
           </div>
         </div>
       </div>
@@ -2155,13 +2225,27 @@
     const loaderLabel = document.getElementById('loader-label');
     const loaderDetail = document.getElementById('loader-detail');
     const stepPills = document.querySelectorAll('#stepper .step-pill');
-    // Three-stage stepper. Time thresholds drive activation; the last stage
-    // is "active forever" until the response lands.
-    const STEPS = [
-      { idx: 0, label: 'Reading your resume', detail: 'Extracting text, fonts, and layout.' },
-      { idx: 1, label: 'Matching the JD',     detail: 'Mapping what you have to what the role asks.' },
-      { idx: 2, label: 'Rewriting bullets',   detail: 'Surfacing JD vocabulary. Truthfully, never inventing.' },
+    // Stepper labels per mode. PARSE/MATCH/REWRITE for resume work;
+    // READ/ANALYZE/DRAFT for cover-letter-only work.
+    const STEPS_RESUME = [
+      { label: 'Reading your resume',  detail: 'Extracting text, fonts, and layout.',                  pill: 'Parse' },
+      { label: 'Matching the JD',      detail: 'Mapping what you have to what the role asks.',         pill: 'Match' },
+      { label: 'Rewriting bullets',    detail: 'Surfacing JD vocabulary. Truthfully, never inventing.', pill: 'Rewrite' },
     ];
+    const STEPS_COVER = [
+      { label: 'Reading your resume',  detail: 'Pulling experience and contact details for context.',  pill: 'Read' },
+      { label: 'Analyzing the JD',     detail: 'Identifying what the role values most.',               pill: 'Analyze' },
+      { label: 'Drafting the letter',  detail: 'Writing a tailored letter with no clichés.',           pill: 'Draft' },
+    ];
+    let STEPS = STEPS_RESUME;
+    function setStepperMode(mode) {
+      STEPS = (mode === 'cover') ? STEPS_COVER : STEPS_RESUME;
+      stepPills.forEach((pill, i) => {
+        const label = STEPS[i] && STEPS[i].pill;
+        const labelEl = pill.querySelector('span:last-child');
+        if (labelEl && label) labelEl.textContent = label;
+      });
+    }
     function _stepIndex(t) {
       if (t < 6) return 0;
       if (t < 18) return 1;
@@ -2293,38 +2377,76 @@
     }
 
     function updateBanner(state) {
-      // state: { remaining, limit, using_user_key }
+      // state: { remaining, limit, using_user_key, providers? }
       // If the user has a saved key, hide it (they already picked BYOK).
       if (state.using_user_key) { banner.classList.remove('is-on'); return; }
       // If they explicitly dismissed it this session, respect that.
       if (bannerDismissed) { banner.classList.remove('is-on'); return; }
-      // Otherwise show with copy that escalates as the shared pool drains.
+
+      // Provider-health pressure: how many configured providers are
+      // currently healthy? Pulled from /health alongside /api/quota.
+      const provs = Array.isArray(state.providers) ? state.providers : [];
+      const configured = provs.filter(p => p.configured);
+      const healthy = configured.filter(p => p.healthy);
+      const heavyLoad = configured.length >= 2 && healthy.length < 2;
+      const allDown = configured.length > 0 && healthy.length === 0;
+
+      // 80%-used threshold: even with quota left, nudge the user to BYOK
+      // when they've already burned through most of their daily allowance.
+      const limit = state.limit || 5;
+      const used = limit - (state.remaining ?? limit);
+      const heavyUse = limit > 0 && (used / limit) >= 0.8 && state.remaining > 0;
+
+      // Pick copy by escalation level. Quota-exhausted > all-down > heavy load > heavy use > healthy.
       if (state.remaining <= 0) {
-        qbTitle.innerHTML = 'Shared key is <em>spent for today</em>.';
-        qbSub.textContent = 'Add a free Groq or Gemini key to keep going. Stored only in this browser.';
-      } else if (state.remaining < 3) {
+        qbTitle.innerHTML = 'You’ve used your <em>daily free runs</em>.';
+        qbSub.textContent = 'Add a free key to continue. Stored in your browser only. Resets at midnight UTC.';
+      } else if (allDown) {
+        qbTitle.innerHTML = 'Free pool is <em>fully booked</em> right now.';
+        qbSub.textContent = 'Add your own free key to keep going. Stored in your browser only.';
+      } else if (heavyLoad) {
+        qbTitle.innerHTML = 'Sharing the <em>free pool</em> with other users today.';
+        qbSub.textContent = 'Add a free Groq or Gemini key to skip the queue. Stored in your browser only.';
+      } else if (heavyUse) {
         qbTitle.innerHTML = `${state.remaining} shared <em>run${state.remaining === 1 ? '' : 's'}</em> left today.`;
         qbSub.textContent = 'Save the rest for someone else. Plug in your own free key to run unlimited.';
       } else {
-        qbTitle.innerHTML = 'Want unlimited runs? <em>Bring your own key.</em>';
-        qbSub.textContent = 'Free Groq or Gemini keys work great. Stored in this browser only, never on our server.';
+        qbTitle.innerHTML = 'Free, no signup. <em>Powered by a shared pool</em> of free LLM providers.';
+        qbSub.textContent = 'Bring your own key any time for unlimited runs. Stored only in this browser.';
       }
       banner.classList.add('is-on');
     }
-    async function fetchQuota() {
+
+    async function fetchQuotaAndHealth() {
+      // Fetch /api/quota and /health in parallel. The banner state is
+      // computed from BOTH so we can surface "free pool overloaded" hints
+      // even when the user's own quota looks fine.
+      const stored = getStoredKey();
+      const headers = {};
+      if (stored) {
+        headers['X-User-Provider'] = stored.provider;
+        headers['X-User-API-Key']  = stored.key;
+      }
       try {
-        const stored = getStoredKey();
-        const headers = {};
-        if (stored) {
-          headers['X-User-Provider'] = stored.provider;
-          headers['X-User-API-Key']  = stored.key;
+        const [qr, hr] = await Promise.all([
+          fetch(apiUrl('/api/quota'), { headers }).catch(() => null),
+          fetch(apiUrl('/health')).catch(() => null),
+        ]);
+        let state = { remaining: 0, limit: 0, using_user_key: false };
+        if (qr && qr.ok) {
+          state = Object.assign(state, await qr.json());
         }
-        const r = await fetch(apiUrl('/api/quota'), { headers });
-        if (!r.ok) return;
-        const d = await r.json();
-        updateBanner(d);
+        if (hr && hr.ok) {
+          try {
+            const hd = await hr.json();
+            state.providers = hd.providers || [];
+          } catch {}
+        }
+        updateBanner(state);
       } catch {/* ignore */}
     }
+    // Legacy alias — other callers fire-and-forget this name.
+    const fetchQuota = fetchQuotaAndHealth;
 
     function refreshKeyUiForProvider() {
       const p = byokProvider.value;
@@ -2368,17 +2490,50 @@
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && byokBackdrop.classList.contains('is-on')) closeByokModal();
     });
+    // Auto-detect provider from the key's prefix. Catches the easy
+    // foot-gun where the user pastes a Gemini key but leaves the dropdown
+    // on Groq — the resulting 401 looks identical to "bad key" and is
+    // really frustrating to diagnose. Each provider's key format is
+    // distinctive enough to match by prefix.
+    function detectProviderFromKey(key) {
+      if (!key) return null;
+      const k = key.trim();
+      if (k.startsWith('sk-ant-')) return 'anthropic';
+      if (k.startsWith('gsk_'))    return 'groq';
+      if (k.startsWith('xai-'))    return 'xai';
+      if (k.startsWith('AIza'))    return 'gemini';
+      // OpenAI is last because its 'sk-' prefix is the most generic and
+      // collides with several legacy formats.
+      if (k.startsWith('sk-'))     return 'openai';
+      return null;
+    }
+    byokKey.addEventListener('input', () => {
+      const detected = detectProviderFromKey(byokKey.value);
+      if (detected && detected !== byokProvider.value && BYOK_HINTS[detected]) {
+        byokProvider.value = detected;
+        refreshKeyUiForProvider();
+      }
+    });
     byokSave.addEventListener('click', () => {
-      const provider = byokProvider.value;
       const key = byokKey.value.trim();
       if (!key) { showToast('Paste your API key first.'); return; }
+      // Final guardrail: if the key prefix and the dropdown disagree,
+      // trust the prefix. The dropdown is a UI hint; the key tells us
+      // where the request must actually go.
+      const detected = detectProviderFromKey(key);
+      let provider = byokProvider.value;
+      if (detected && detected !== provider && BYOK_HINTS[detected]) {
+        provider = detected;
+        byokProvider.value = detected;
+        refreshKeyUiForProvider();
+      }
       if (!BYOK_HINTS[provider]) { showToast('Pick a provider.'); return; }
       setStoredKey(provider, key);
       closeByokModal();
       bannerDismissed = false;
       refreshClearKeyVisibility();
       fetchQuota();
-      showToast('Key saved. It stays in this browser.');
+      showToast(`Key saved (provider: ${provider}). Stored in this browser only.`);
     });
 
     qbOpenBtn.addEventListener('click', () => openByokModal('cta'));
@@ -2396,19 +2551,121 @@
     refreshClearKeyVisibility();
     fetchQuota();
 
+    // ────────── output-mode toggles ──────────
+    const optResume = document.getElementById('opt-resume');
+    const optCover  = document.getElementById('opt-cover');
+    const goLabel   = document.getElementById('go-label');
+    const modeHint  = document.getElementById('mode-hint');
+    const goBtn     = document.getElementById('go');
+
+    // Result-panel sections we need to hide in cover-letter-only mode.
+    const resultsScores   = document.querySelector('#results .scores');
+    const resultsDownload = document.querySelector('#results .download-row');
+    const resultsChips    = document.querySelector('#results .chip-cols');
+
+    function currentMode() {
+      const r = optResume.checked, c = optCover.checked;
+      if (r && c)  return 'both';
+      if (r)       return 'resume';
+      if (c)       return 'cover';
+      return 'none';
+    }
+    function refreshModeUI() {
+      const mode = currentMode();
+      // Sync aria-checked on both toggles for accessibility.
+      optResume.setAttribute('aria-checked', String(optResume.checked));
+      optCover.setAttribute('aria-checked',  String(optCover.checked));
+      // Submit button label per mode.
+      if      (mode === 'resume') goLabel.textContent = 'Reframe my resume';
+      else if (mode === 'cover')  goLabel.textContent = 'Write my cover letter';
+      else if (mode === 'both')   goLabel.textContent = 'Reframe everything';
+      else                        goLabel.textContent = 'Reframe my resume';
+      // Disable + show hint when neither toggle is on.
+      goBtn.disabled = (mode === 'none');
+      modeHint.hidden = (mode !== 'none');
+    }
+    [optResume, optCover].forEach(el => el.addEventListener('change', refreshModeUI));
+    refreshModeUI();
+
     // ────────── form submit ──────────
     const form = document.getElementById('f');
-    const goBtn = document.getElementById('go');
+
+    /** Decode base64 → Blob → trigger download via a hidden anchor. */
+    function downloadB64Blob(b64, filename, mimeType) {
+      const bin = atob(b64);
+      const buf = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+      const blob = new Blob([buf], { type: mimeType });
+      const url = URL.createObjectURL(blob);
+      const a = document.getElementById('cl-anchor');
+      a.href = url;
+      a.download = filename || 'cover-letter';
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+    const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    const PDF_MIME  = 'application/pdf';
+
+    /** Show + populate the cover letter card; wire up the download/copy buttons. */
+    function showCoverLetterCard(text, payload) {
+      // payload may be {docx_b64, docx_filename, pdf_b64, pdf_filename}
+      // or null when called from the /tailor path (no in-response downloads).
+      payload = payload || {};
+      const wrap = document.getElementById('cl-wrap');
+      const textEl = document.getElementById('cl-text');
+      wrap.style.display = 'block';
+      if (reduced) textEl.textContent = text;
+      else         typewriter(textEl, text, 12);
+
+      const docxBtn = document.getElementById('cl-download-docx');
+      const pdfBtn  = document.getElementById('cl-download-pdf');
+      const cpBtn   = document.getElementById('cl-copy');
+
+      if (payload.docx_b64) {
+        docxBtn.style.display = 'inline-flex';
+        docxBtn.onclick = () => downloadB64Blob(payload.docx_b64, payload.docx_filename || 'cover-letter.docx', DOCX_MIME);
+      } else {
+        docxBtn.style.display = 'none';
+      }
+
+      if (payload.pdf_b64) {
+        pdfBtn.style.display = 'inline-flex';
+        pdfBtn.onclick = () => downloadB64Blob(payload.pdf_b64, payload.pdf_filename || 'cover-letter.pdf', PDF_MIME);
+      } else {
+        pdfBtn.style.display = 'none';
+      }
+
+      cpBtn.onclick = async () => {
+        try {
+          await navigator.clipboard.writeText(text);
+          showToast('Copied');
+        } catch {
+          showToast('Copy failed. Select and copy manually.');
+        }
+      };
+    }
+
+    function setResultsLayout(mode) {
+      // In cover-letter-only mode, hide match-score / ATS / download-row /
+      // chip columns. Show them otherwise.
+      const hideResumeSections = (mode === 'cover');
+      if (resultsScores)   resultsScores.style.display   = hideResumeSections ? 'none' : '';
+      if (resultsDownload) resultsDownload.style.display = hideResumeSections ? 'none' : '';
+      if (resultsChips)    resultsChips.style.display    = hideResumeSections ? 'none' : '';
+    }
+
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
+      const mode = currentMode();
+      if (mode === 'none') return;
       const file = resumeInput.files[0];
       const jdTxt = document.getElementById('jd').value.trim();
-      if (!file) return showToast('Pick a resume file first.');
+      if (!file)  return showToast('Pick a resume file first.');
       if (!jdTxt) return showToast('Paste a job description first.');
+
       const fd = new FormData();
       fd.append('resume', file);
       fd.append('jd', jdTxt);
-      fd.append('cover_letter', document.getElementById('cover').checked ? 'true' : 'false');
 
       const stored = getStoredKey();
       const headers = {};
@@ -2417,10 +2674,16 @@
         headers['X-User-API-Key']  = stored.key;
       }
 
+      const route = (mode === 'cover') ? '/cover-letter' : '/tailor';
+      if (mode !== 'cover') {
+        fd.append('cover_letter', (mode === 'both') ? 'true' : 'false');
+      }
+
+      setStepperMode(mode === 'cover' ? 'cover' : 'resume');
       goBtn.disabled = true;
       startLoading();
       try {
-        const resp = await fetch(apiUrl('/tailor'), { method: 'POST', body: fd, headers });
+        const resp = await fetch(apiUrl(route), { method: 'POST', body: fd, headers });
         const ct = resp.headers.get('content-type') || '';
         if (resp.status === 429) {
           let body = null;
@@ -2452,32 +2715,48 @@
 
         const results = document.getElementById('results');
         results.style.display = 'block';
+        setResultsLayout(mode);
         results.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        animateNum(document.getElementById('match-num'), Math.round((data.match_score || 0) * 100));
-        animateNum(document.getElementById('ats-num'),   Math.round((data.ats_score?.keyword_coverage || 0) * 100));
-        const ext = (data.output_format || 'docx').toLowerCase();
-        document.getElementById('dl-resume').href = apiUrl(data.download_url);
-        document.getElementById('dl-resume-text').textContent = `Download resume (.${ext})`;
-        const dlCl = document.getElementById('dl-cl');
-        if (data.cover_letter_url) {
-          dlCl.href = apiUrl(data.cover_letter_url);
-          dlCl.style.display = 'inline-flex';
-        } else { dlCl.style.display = 'none'; }
-        renderChips('covered', data.match_report?.covered, 'good');
-        renderChips('weak',    data.match_report?.weakly_covered, 'warn');
-        renderChips('missing', data.match_report?.missing, 'bad');
-        if (data.cover_letter) {
-          document.getElementById('cl-wrap').style.display = 'block';
-          if (reduced) document.getElementById('cl-text').textContent = data.cover_letter;
-          else typewriter(document.getElementById('cl-text'), data.cover_letter, 12);
+
+        if (mode === 'cover') {
+          // Cover-letter-only response: just the card with all download formats.
+          showCoverLetterCard(data.text || '', {
+            docx_b64: data.docx_b64,
+            docx_filename: data.docx_filename || data.filename,
+            pdf_b64: data.pdf_b64,
+            pdf_filename: data.pdf_filename,
+          });
         } else {
-          document.getElementById('cl-wrap').style.display = 'none';
+          // /tailor response: scores, downloads, chips, optional cover letter.
+          animateNum(document.getElementById('match-num'), Math.round((data.match_score || 0) * 100));
+          animateNum(document.getElementById('ats-num'),   Math.round((data.ats_score?.keyword_coverage || 0) * 100));
+          const ext = (data.output_format || 'docx').toLowerCase();
+          document.getElementById('dl-resume').href = apiUrl(data.download_url);
+          document.getElementById('dl-resume-text').textContent = `Download resume (.${ext})`;
+          const dlCl = document.getElementById('dl-cl');
+          if (data.cover_letter_url) {
+            dlCl.href = apiUrl(data.cover_letter_url);
+            dlCl.style.display = 'inline-flex';
+          } else { dlCl.style.display = 'none'; }
+          renderChips('covered', data.match_report?.covered, 'good');
+          renderChips('weak',    data.match_report?.weakly_covered, 'warn');
+          renderChips('missing', data.match_report?.missing, 'bad');
+          if (data.cover_letter) {
+            // /tailor doesn't return docx_b64/pdf_b64 — the resume tailoring
+            // path still uses the legacy /download/cover-*.pdf link via
+            // dl-cl. The card here shows the text + copy button only; the
+            // .docx/.pdf in-card download buttons are hidden cleanly.
+            showCoverLetterCard(data.cover_letter, null);
+          } else {
+            document.getElementById('cl-wrap').style.display = 'none';
+          }
         }
       } catch (err) {
         stopLoading(false);
         showToast(err.message || String(err));
       } finally {
-        goBtn.disabled = false;
+        // Re-enable based on current toggle state (not blindly true).
+        refreshModeUI();
       }
     });
 

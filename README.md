@@ -122,6 +122,45 @@ The stack includes a Caddy reverse proxy that provisions Let's Encrypt TLS certi
 
 The `api` container is NOT exposed to the public network. Only Caddy listens on 80/443; it reverse-proxies internally to `api:8000` over the docker network.
 
+### Production deployment — provider keys for maximum uptime
+
+For best uptime, set **all** of these in your Space Secrets (or VPS `.env`) so the auto-fallback has options to rotate through:
+
+```bash
+LLM_PROVIDER=auto
+GROQ_API_KEY=gsk_...        # free, no card, generous quotas — console.groq.com
+GEMINI_API_KEY=AIza...      # free, no card — aistudio.google.com/apikey
+XAI_API_KEY=xai-...         # free credits on signup — console.x.ai
+# Optional paid fallbacks
+ANTHROPIC_API_KEY=sk-ant-...
+OPENAI_API_KEY=sk-...
+```
+
+Recommended models (free tier, large daily quotas):
+
+```bash
+GROQ_MODEL=llama-3.3-70b-versatile
+GROQ_FAST_MODEL=llama-3.1-8b-instant
+GEMINI_MODEL=gemini-2.5-flash-lite
+GEMINI_FAST_MODEL=gemini-2.5-flash-lite
+XAI_MODEL=grok-3
+XAI_FAST_MODEL=grok-3-mini
+```
+
+Daily-quota + fallback tuning knobs (defaults shown):
+
+```bash
+SHARED_DAILY_QUOTA=5              # per-IP /tailor runs on the shared pool
+BYOK_FALLBACK_TO_SHARED=true      # BYOK quota-out falls through silently
+MAX_REQUEST_SECONDS=90            # per-request wall budget for graceful skips
+PROVIDER_COOLDOWN_QUOTA_S=21600   # 6h after a daily-quota hit
+PROVIDER_COOLDOWN_TRANSIENT_S=60  # 60s after a 429 / 5xx
+PROVIDER_COOLDOWN_AUTH_S=86400    # 24h after auth/billing failure
+```
+
+How it works at runtime: every request picks the healthiest provider; failed providers cool down for the right duration based on the failure category; quota-exhausted Gemini stays cold for 6 hours, then re-enters the rotation; auth errors disable a provider for 24 hours (the key likely needs the operator's attention). Healthy providers rotate per request to spread load. Watch `GET /health` for live provider state.
+
+
 **Security defaults applied:**
 - HSTS with `preload` and `includeSubDomains`, 1 year.
 - Strict CSP allowing only `cdnjs.cloudflare.com` for scripts and Google Fonts for stylesheets.

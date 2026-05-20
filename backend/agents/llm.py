@@ -1,20 +1,26 @@
-"""Provider-pluggable LLM wrapper with auto-fallback.
+"""Provider-pluggable LLM wrapper with production-grade auto-fallback.
 
-LLM_PROVIDER values:
-  auto       Try Groq -> xAI -> Anthropic (whichever has a key set), in that
-             order. On 429 or connection errors, the failing provider cools
-             down for 30 seconds and the next is tried.
-  anthropic  Anthropic only.
-  xai / grok xAI Grok only.
-  groq       Groq only.
+LLM_PROVIDER=auto rotates through every configured provider key. Per-process
+shared health tracks each provider's cooldown so a quota-exhausted Gemini
+stays cold across requests, not just one. Failure categorization picks the
+right cooldown: a 429 burns 60s, a quota-exhausted account burns 6 hours,
+a bad key burns 24 hours.
+
+Healthy providers serve in round-robin. Cooling providers move to the tail
+of the chain — they're tried only if everything healthy has already failed.
+
+See `provider_health_snapshot()` for diagnostic state used by /health.
 """
 from __future__ import annotations
 
 import json
 import logging
+import os
 import re
+import threading
 import time
-from typing import Any, Callable, List, Optional
+from dataclasses import dataclass, field
+from typing import Any, Callable, Dict, List, Literal, Optional
 
 from backend.config import get_settings
 
@@ -22,11 +28,86 @@ from backend.config import get_settings
 logger = logging.getLogger(__name__)
 
 
-COOLDOWN_SECONDS = 30.0
-# Permanent-ish errors (no credits, bad key, account disabled): don't ping
-# this provider again for the rest of the process lifetime — there's no point
-# burning a round-trip per LLM call when the answer won't change.
-LONG_COOLDOWN_SECONDS = 60 * 60 * 24
+# ── Module-level provider health ──────────────────────────────────────────
+# Per-provider state SHARED across all LLM() instances. This is what lets
+# a Gemini quota-exhaustion in one request affect the next request's
+# routing — without this, every new LLM() would re-test all providers.
+
+ErrorCategory = Literal["quota", "transient", "auth", "bad_request", "unknown"]
+
+
+@dataclass
+class ProviderHealth:
+    cool_until: float = 0.0
+    last_error: str = ""
+    last_error_category: str = ""
+    consecutive_failures: int = 0
+    last_success: float = 0.0
+    total_calls: int = 0
+    total_failures: int = 0
+
+
+_PROVIDER_HEALTH: Dict[str, ProviderHealth] = {}
+_HEALTH_LOCK = threading.Lock()
+# Round-robin index across healthy providers. Bumped each LLM.complete()
+# call to spread load when the operator has multiple healthy keys.
+_RR_INDEX = 0
+
+
+def _health_for(name: str) -> ProviderHealth:
+    """Get or lazily create the ProviderHealth for `name`."""
+    with _HEALTH_LOCK:
+        h = _PROVIDER_HEALTH.get(name)
+        if h is None:
+            h = ProviderHealth()
+            _PROVIDER_HEALTH[name] = h
+        return h
+
+
+def _record_success(name: str) -> None:
+    h = _health_for(name)
+    with _HEALTH_LOCK:
+        h.consecutive_failures = 0
+        h.last_success = time.time()
+        h.total_calls += 1
+
+
+def _record_failure(name: str, err: Exception, cooldown: float, category: str) -> None:
+    h = _health_for(name)
+    with _HEALTH_LOCK:
+        h.total_calls += 1
+        h.total_failures += 1
+        h.consecutive_failures += 1
+        h.last_error = str(err)[:200]
+        h.last_error_category = category
+        if cooldown > 0:
+            # Only EXTEND the cooldown — a fresh transient failure shouldn't
+            # shorten an existing quota cooldown.
+            h.cool_until = max(h.cool_until, time.time() + cooldown)
+
+
+def provider_health_snapshot() -> Dict[str, Dict[str, Any]]:
+    """Public read-only view of the health registry. Used by /health."""
+    out: Dict[str, Dict[str, Any]] = {}
+    now = time.time()
+    with _HEALTH_LOCK:
+        for name, h in _PROVIDER_HEALTH.items():
+            failure_rate = (h.total_failures / h.total_calls) if h.total_calls else 0.0
+            out[name] = {
+                "healthy": h.cool_until <= now,
+                "cool_until_epoch": h.cool_until if h.cool_until > now else None,
+                "last_error": h.last_error or None,
+                "last_error_category": h.last_error_category or None,
+                "consecutive_failures": h.consecutive_failures,
+                "last_success_epoch": h.last_success or None,
+                "total_calls": h.total_calls,
+                "total_failures": h.total_failures,
+                "failure_rate": round(failure_rate, 3),
+            }
+    return out
+
+
+# ── Provider definition ──────────────────────────────────────────────────
 
 
 class _Provider:
@@ -35,13 +116,6 @@ class _Provider:
         self.client = client
         self.model = model
         self._complete_fn = complete_fn
-        self.cool_until: float = 0.0
-
-    def available(self) -> bool:
-        return time.time() >= self.cool_until
-
-    def cool(self, seconds: float = COOLDOWN_SECONDS) -> None:
-        self.cool_until = time.time() + seconds
 
     def complete(self, system, user, max_tokens, temperature):
         return self._complete_fn(self.client, self.model, system, user, max_tokens, temperature)
@@ -141,49 +215,114 @@ _BUILDERS = {
 _AUTO_ORDER = ["groq", "gemini", "xai", "openai", "anthropic"]
 
 
-def _classify_error(err) -> float:
-    """Return a cooldown duration in seconds for this provider after the
-    given error. 0 means don't cool (try again on next call).
+def _categorize_error(err: Exception) -> ErrorCategory:
+    """Classify an error so we can pick the right cooldown.
 
-    - Transient (429 / rate limit / 5xx / connection): COOLDOWN_SECONDS
-    - Permanent-ish (401 invalid key, 403 no credits / disabled team,
-      404 model not found): LONG_COOLDOWN_SECONDS — pinging the same
-      provider on every call just wastes a round-trip each time, so we
-      effectively disable it for the rest of the process lifetime.
-    - Anything else: 0 (transient, but no explicit backoff)
+    Returned categories and intended treatment:
+      "quota"       — daily/monthly limit hit. Long cooldown (~6h).
+      "transient"   — rate limit / 5xx / network blip. Short cooldown (60s).
+      "auth"        — bad key, no credits, account disabled. Cold for 24h.
+      "bad_request" — our prompt is wrong; do NOT cool the provider.
+      "unknown"     — anything else; mild cooldown (30s).
     """
     msg = str(err).lower()
+    status = getattr(err, "status_code", None) or getattr(err, "code", None)
 
-    # Permanent: auth, permissions, billing, model not available
-    permanent_signals = (
-        "401", "403", "404",
+    # Quota — long cooldown so we don't burn round-trips for hours.
+    quota_signals = (
+        "quota exceeded", "quota_exhausted", "resource_exhausted",
+        "insufficient_quota", "exceeded your current quota", "billing",
+        "tokens per day", "requests per day",
+    )
+    if any(t in msg for t in quota_signals):
+        return "quota"
+
+    # Auth / permission / no credits — effectively permanent for this process.
+    auth_signals = (
         "invalid_api_key", "invalid api key", "incorrect api key",
         "no permission", "does not have permission",
-        "no credits", "insufficient credits", "insufficient_quota",
-        "doesn't have any credits", "no licenses", "license",
+        "no credits", "insufficient credits",
+        "doesn't have any credits", "no licenses",
         "account is disabled", "team is disabled",
-        "model_not_found", "model not found",
+        "authentication", "unauthorized",
     )
-    if any(sig in msg for sig in permanent_signals):
-        return LONG_COOLDOWN_SECONDS
+    if status == 401 or status == 403 or any(t in msg for t in auth_signals):
+        return "auth"
 
-    # Transient: rate limits + 5xx
+    # Bad request — the prompt was malformed; not the provider's fault.
+    if status == 400 or "bad request" in msg or "model_not_found" in msg:
+        return "bad_request"
+
+    # Transient — rate limit / 5xx / network.
     transient_signals = (
         "429", "rate limit", "too many",
         "500", "502", "503", "504",
         "connection", "timeout", "timed out",
+        "overloaded", "unavailable",
     )
-    if any(sig in msg for sig in transient_signals):
-        return COOLDOWN_SECONDS
+    if status in (429, 502, 503, 504) or any(t in msg for t in transient_signals):
+        return "transient"
 
     try:
         from openai import RateLimitError
         if isinstance(err, RateLimitError):
-            return COOLDOWN_SECONDS
+            return "transient"
     except Exception:
         pass
 
-    return 0.0
+    return "unknown"
+
+
+def _cooldown_for_category(cat: ErrorCategory) -> float:
+    """Translate a category to a cooldown duration in seconds. Env-tunable
+    via PROVIDER_COOLDOWN_*_S settings."""
+    settings = get_settings()
+    if cat == "quota":
+        return float(settings.provider_cooldown_quota_s)
+    if cat == "transient":
+        return float(settings.provider_cooldown_transient_s)
+    if cat == "auth":
+        return float(settings.provider_cooldown_auth_s)
+    if cat == "bad_request":
+        return 0.0  # do not cool the provider — the next call has a different prompt
+    return float(settings.provider_cooldown_unknown_s)
+
+
+def _has_key(settings, name: str) -> bool:
+    key_attr = {
+        "groq": "groq_api_key",
+        "gemini": "gemini_api_key",
+        "xai": "xai_api_key",
+        "openai": "openai_api_key",
+        "anthropic": "anthropic_api_key",
+    }.get(name)
+    if not key_attr:
+        return False
+    return bool(getattr(settings, key_attr, None))
+
+
+def _ordered_providers(settings) -> List[str]:
+    """Return the provider chain for LLM_PROVIDER=auto: configured providers
+    ordered healthy-first (within base preference), cooling-last. Cooling
+    providers stay in the list as a last-resort fallback."""
+    base = ["groq", "gemini", "xai", "openai", "anthropic"]
+    configured = [p for p in base if _has_key(settings, p)]
+    now = time.time()
+    healthy = [p for p in configured if _health_for(p).cool_until <= now]
+    cooling = [p for p in configured if p not in healthy]
+    return healthy + cooling
+
+
+def _pick_starting_index(healthy_count: int) -> int:
+    """Round-robin starting index across healthy providers. Spreads load
+    when the operator has multiple healthy keys configured."""
+    global _RR_INDEX
+    if healthy_count <= 0:
+        return 0
+    with _HEALTH_LOCK:
+        idx = _RR_INDEX % healthy_count
+        _RR_INDEX = (_RR_INDEX + 1) % max(1, healthy_count)
+    return idx
 
 
 class LLM:
@@ -194,7 +333,7 @@ class LLM:
         self.providers: List[_Provider] = []
 
         if provider == "auto":
-            for name in _AUTO_ORDER:
+            for name in _ordered_providers(settings):
                 p = _BUILDERS[name](settings, fast)
                 if p is not None:
                     if model:
@@ -268,54 +407,95 @@ class LLM:
         inst.providers = [p]
         return inst
 
-    def complete(self, system: str, user: str, max_tokens: int = 2048, temperature: float = 0.2) -> str:
+    def complete(
+        self,
+        system: str,
+        user: str,
+        max_tokens: int = 2048,
+        temperature: float = 0.2,
+        *,
+        deadline: Optional[float] = None,
+    ) -> str:
+        """Try each provider in this LLM's chain. Healthy providers are tried
+        in round-robin order so load spreads. Cooling providers are at the
+        tail of the chain and only tried if everything healthy has failed.
+
+        `deadline` is an absolute epoch time past which we abort the
+        fallback walk and raise. The agents pass the orchestrator's
+        request-wide deadline so a slow chain of failures never burns more
+        than MAX_REQUEST_SECONDS on a single agent call.
+        """
         last_err: Optional[Exception] = None
-        for p in self.providers:
-            if not p.available():
-                continue
-            try:
-                return p.complete(system, user, max_tokens, temperature)
-            except Exception as e:
-                cooldown = _classify_error(e)
-                if cooldown > 0:
-                    p.cool(cooldown)
-                    logger.warning(
-                        "Provider %s failed (%.0fs cooldown): %s",
-                        p.name, cooldown, str(e)[:200],
-                    )
-                last_err = e
-                continue
+        last_category: ErrorCategory = "unknown"
 
-        # All providers were unavailable or failed. Pick the one whose
-        # cooldown ends soonest (excluding ones with very long cooldowns
-        # like 24h permanent fails — no point waiting hours), wait for it,
-        # and retry a few times with progressive backoff. This is the
-        # critical path for users with only one working provider.
-        candidates = [p for p in self.providers if p.cool_until - time.time() < 300]
-        if not candidates:
-            raise RuntimeError(
-                f"All providers are unavailable for an extended period. Last error: {last_err}"
-            )
-        soonest = min(candidates, key=lambda x: x.cool_until)
-        for attempt in range(3):
-            wait = max(0.0, soonest.cool_until - time.time())
-            if wait > 0:
-                logger.info("Waiting %.0fs for %s cooldown (attempt %d)", wait, soonest.name, attempt + 1)
-                time.sleep(min(wait, 60.0))
-            try:
-                return soonest.complete(system, user, max_tokens, temperature)
-            except Exception as e:
-                last_err = e
-                cooldown = _classify_error(e)
-                if cooldown > 0:
-                    soonest.cool(cooldown)
+        # Partition this chain into healthy/cooling using the module-level
+        # health registry. Healthy providers go first (rotated by RR),
+        # cooling stays as a tail fallback.
+        now = time.time()
+        healthy = [p for p in self.providers if _health_for(p.name).cool_until <= now]
+        cooling = [p for p in self.providers if _health_for(p.name).cool_until > now]
+
+        ordered: List[_Provider] = []
+        if healthy:
+            start = _pick_starting_index(len(healthy))
+            ordered.extend(healthy[start:] + healthy[:start])
+        ordered.extend(cooling)
+
+        for p in ordered:
+            if deadline is not None and time.time() >= deadline:
+                # We're out of time-budget before even trying the next
+                # provider. Don't burn more wall-clock — bubble the
+                # last_err up so the orchestrator can decide.
                 logger.warning(
-                    "Retry %d on %s failed: %s", attempt + 1, soonest.name, str(e)[:200]
+                    "LLM.complete aborting (deadline reached); attempted=%s",
+                    [pp.name for pp in ordered[: ordered.index(p)]],
                 )
-        raise RuntimeError(f"All providers failed after retries. Last error: {last_err}")
+                break
+            try:
+                result = p.complete(system, user, max_tokens, temperature)
+                _record_success(p.name)
+                return result
+            except Exception as e:
+                cat = _categorize_error(e)
+                cooldown = _cooldown_for_category(cat)
+                _record_failure(p.name, e, cooldown, cat)
+                last_err = e
+                last_category = cat
+                logger.warning(
+                    "Provider %s failed (%s, cool=%.0fs): %s",
+                    p.name, cat, cooldown, str(e)[:200],
+                )
+                continue
 
-    def complete_json(self, system: str, user: str, max_tokens: int = 3000, temperature: float = 0.1) -> Any:
-        raw = self.complete(system, user, max_tokens=max_tokens, temperature=temperature)
+        # Every provider in the chain failed (or the chain was empty).
+        # Don't sleep-and-retry here — the modern auto chain has multiple
+        # providers and waiting on a single cooling one risks blowing the
+        # request-wide deadline. The caller decides what to do.
+        if last_err is None:
+            raise RuntimeError(
+                "No providers available in this LLM chain. Configure at "
+                "least one of GROQ_API_KEY, GEMINI_API_KEY, XAI_API_KEY, "
+                "OPENAI_API_KEY, or ANTHROPIC_API_KEY."
+            )
+        raise RuntimeError(
+            f"All providers failed (last category={last_category}). "
+            f"Last error: {last_err}"
+        )
+
+    def complete_json(
+        self,
+        system: str,
+        user: str,
+        max_tokens: int = 3000,
+        temperature: float = 0.1,
+        *,
+        deadline: Optional[float] = None,
+    ) -> Any:
+        raw = self.complete(
+            system, user,
+            max_tokens=max_tokens, temperature=temperature,
+            deadline=deadline,
+        )
         return parse_json_block(raw)
 
 

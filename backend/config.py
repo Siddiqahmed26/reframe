@@ -28,8 +28,15 @@ class Settings(BaseSettings):
     groq_base_url: str = Field(default="https://api.groq.com/openai/v1", alias="GROQ_BASE_URL")
 
     gemini_api_key: str = Field(default="", alias="GEMINI_API_KEY")
-    gemini_model: str = Field(default="gemini-2.0-flash", alias="GEMINI_MODEL")
-    gemini_fast_model: str = Field(default="gemini-2.0-flash", alias="GEMINI_FAST_MODEL")
+    # Free-tier RPD limits (May 2026, per Google's error response):
+    #   gemini-2.5-flash       → 20  RPD  (too restrictive for this pipeline)
+    #   gemini-2.5-flash-lite  → 1000 RPD (the practical default)
+    # The pipeline does ~6-8 LLM calls per tailor run (jd_analyzer,
+    # resume_analyzer, matcher, rewriter batches, ats_optimizer, optional
+    # cover_letter). flash-lite handles all of them — it's plenty capable
+    # for structured JSON extraction and short prose.
+    gemini_model: str = Field(default="gemini-2.5-flash-lite", alias="GEMINI_MODEL")
+    gemini_fast_model: str = Field(default="gemini-2.5-flash-lite", alias="GEMINI_FAST_MODEL")
     gemini_base_url: str = Field(default="https://generativelanguage.googleapis.com/v1beta/openai/", alias="GEMINI_BASE_URL")
 
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
@@ -38,6 +45,26 @@ class Settings(BaseSettings):
     openai_base_url: str = Field(default="https://api.openai.com/v1", alias="OPENAI_BASE_URL")
 
     shared_daily_quota: int = Field(default=5, alias="SHARED_DAILY_QUOTA")
+
+    # ── Provider health / fallback tuning ───────────────────────────────
+    # Cooldowns by failure category. The auto chain skips a provider whose
+    # cool_until is in the future and tries the next. Long quota cooldowns
+    # let us re-check after some users have left (free tiers sometimes
+    # roll on rolling windows, not strict midnight).
+    provider_cooldown_quota_s: int = Field(default=21600, alias="PROVIDER_COOLDOWN_QUOTA_S")
+    provider_cooldown_transient_s: int = Field(default=60, alias="PROVIDER_COOLDOWN_TRANSIENT_S")
+    provider_cooldown_auth_s: int = Field(default=86400, alias="PROVIDER_COOLDOWN_AUTH_S")
+    provider_cooldown_unknown_s: int = Field(default=30, alias="PROVIDER_COOLDOWN_UNKNOWN_S")
+
+    # Per-request wall-clock budget. Past this, agents skip non-critical
+    # steps (second rewriter pass, cover letter) rather than 503-ing the
+    # whole request.
+    max_request_seconds: int = Field(default=90, alias="MAX_REQUEST_SECONDS")
+
+    # When a BYOK request fails for quota / transient reasons, transparently
+    # fall through to the operator's shared key pool. Disable if you want
+    # the user to see their own provider's failure verbatim.
+    byok_fallback_to_shared: bool = Field(default=True, alias="BYOK_FALLBACK_TO_SHARED")
 
     host: str = Field(default="0.0.0.0", alias="HOST")
     port: int = Field(default=8000, alias="PORT")

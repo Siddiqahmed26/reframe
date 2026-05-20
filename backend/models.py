@@ -33,6 +33,10 @@ class ResumeParagraph(BaseModel):
 class ResumeAnalysis(BaseModel):
     """Logical view of the resume independent of formatting."""
     candidate_name: str = ""
+    # Optional headline that sits under the name on resumes (e.g.
+    # "Generative AI Engineer | LLM Applications"). Kept separate so the
+    # cover-letter renderer can style it distinctly from the name itself.
+    candidate_headline: str = ""
     contact: Dict[str, str] = Field(default_factory=dict)
     summary: str = ""
     skills: List[str] = Field(default_factory=list)
@@ -86,7 +90,19 @@ class TailorResponse(BaseModel):
 
 class CoverLetterResponse(BaseModel):
     text: str
+    # Legacy field — kept so older clients still work. New clients should
+    # use {docx,pdf}_b64 and download from the same response.
     download_url: Optional[str] = None
+    # Base64-encoded .docx bytes the frontend can decode into a Blob and
+    # offer as a download without a second HTTP request.
+    docx_b64: Optional[str] = None
+    docx_filename: Optional[str] = None
+    # Same idea for the PDF rendering of the cover letter.
+    pdf_b64: Optional[str] = None
+    pdf_filename: Optional[str] = None
+    # Alias kept so older frontends that read `filename` keep working
+    # (defaults to docx_filename so existing handlers don't break).
+    filename: Optional[str] = None
 
 
 class HealthResponse(BaseModel):

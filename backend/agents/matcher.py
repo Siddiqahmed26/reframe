@@ -1,8 +1,13 @@
 """Agent: gap analysis between resume and JD."""
 from __future__ import annotations
 
+import logging
+
 from backend.agents.llm import LLM
 from backend.models import JDAnalysis, ResumeAnalysis, MatchReport
+
+
+logger = logging.getLogger(__name__)
 
 
 SYSTEM = """You are a hiring manager doing first-pass resume screening. Compare a candidate's resume to the job description and produce a gap analysis.
@@ -59,10 +64,33 @@ Candidate resume analysis:
 """
     if llm is None:
         llm = LLM()
-    data = llm.complete_json(system=SYSTEM, user=user, max_tokens=2500)
+    logger.info(
+        "Matcher firing — jd skills=%d, resume bullets=%d",
+        len(jd.must_have_skills or []) + len(jd.nice_to_have_skills or []),
+        len(resume.experience_bullets or []),
+    )
+    try:
+        data = llm.complete_json(system=SYSTEM, user=user, max_tokens=2500)
+    except Exception:
+        # Log the full traceback so we can tell apart rate limits, parse
+        # errors, and provider failures. Re-raise so the orchestrator can
+        # decide whether to retry or 503.
+        logger.exception("Matcher LLM call failed")
+        raise
     if not isinstance(data, dict):
+        logger.warning(
+            "Matcher: LLM returned non-dict (%s); empty MatchReport. "
+            "First 200 chars of repr: %r",
+            type(data).__name__, repr(data)[:200],
+        )
         return MatchReport()
-    return MatchReport(**{k: v for k, v in data.items() if v is not None})
+    report = MatchReport(**{k: v for k, v in data.items() if v is not None})
+    logger.info(
+        "Matcher result: score=%.2f covered=%d weak=%d missing=%d",
+        report.overall_score, len(report.covered),
+        len(report.weakly_covered), len(report.missing),
+    )
+    return report
 
 
 def _compact_json(data) -> str:

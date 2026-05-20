@@ -166,66 +166,99 @@ _METRIC_PATTERNS = [
 _METRIC_RE = re.compile("(" + "|".join(_METRIC_PATTERNS) + ")")
 
 
-def _html_escape(s: str) -> str:
-    return (
-        s.replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-    )
+def _tokenize_runs(text: str) -> List[Tuple[str, bool]]:
+    """Split text into alternating (chunk, is_bold) runs based on metric
+    patterns. Bold runs are quantitative tokens like '5+', '~70%', '10K+',
+    '2-week'. Everything else is regular."""
+    runs: List[Tuple[str, bool]] = []
+    last = 0
+    for m in _METRIC_RE.finditer(text):
+        if m.start() > last:
+            runs.append((text[last:m.start()], False))
+        runs.append((m.group(), True))
+        last = m.end()
+    if last < len(text):
+        runs.append((text[last:], False))
+    return runs
 
 
-def _to_metric_bold_html(text: str) -> str:
-    """Wrap metric substrings in <b>. Escapes HTML first so the rewrite
-    text is safe to inject."""
-    if not text:
-        return ""
-    escaped = _html_escape(text)
-    return _METRIC_RE.sub(r"<b>\1</b>", escaped)
+_ATTACHING_PUNCT = ",.;:!?)]}"
 
 
-def _try_insert_html(page, rect, new_text: str, base_size: float,
-                     color: Tuple[float, float, float]) -> bool:
-    """Render new_text into rect via insert_htmlbox so metric patterns get
-    bolded inline. Returns True if it fit, False if PyMuPDF reported overflow
-    (caller should fall back to insert_textbox)."""
+def _layout_lines(
+    text: str,
+    fontname_reg: str,
+    fontname_bold: str,
+    size: float,
+    max_width: float,
+) -> List[List[Tuple[str, bool, float]]]:
+    """Wrap text into lines manually. Returns a list of lines, where each
+    line is a list of (word, is_bold, width_in_points). Word widths use the
+    appropriate font (regular or bold) so wrap accounts for the wider bold
+    glyphs. Words that start with attaching punctuation (",;:.!?)]}") render
+    flush against the previous word (no leading space)."""
     import pymupdf
 
-    html_body = _to_metric_bold_html(new_text)
-    if "<b>" not in html_body:
-        # No metrics to bold — no point routing through the HTML pipeline;
-        # let the textbox path handle it (more reliable font matching).
-        return False
+    runs = _tokenize_runs(text)
+    words: List[Tuple[str, bool, float]] = []
+    for chunk, is_bold in runs:
+        font = fontname_bold if is_bold else fontname_reg
+        for part in chunk.split(" "):
+            if not part:
+                continue
+            w = pymupdf.get_text_length(part, fontname=font, fontsize=size)
+            words.append((part, is_bold, w))
 
-    r, g, b = (int(color[0] * 255), int(color[1] * 255), int(color[2] * 255))
-    # font-variant-ligatures: none + feature-settings disable common ligatures
-    # (fi, fl, ff). Without this, PyMuPDF's Story renderer emits U+FB01/FB02
-    # glyphs, which extract as "ﬁ"/"ﬂ" and break ATS keyword matching
-    # ("fine-tuning" -> "ne-tuning" miss).
-    css = (
-        "* { margin: 0; padding: 0; }\n"
-        "body {\n"
-        f"  font-family: sans-serif;\n"
-        f"  font-size: {base_size:.1f}pt;\n"
-        f"  color: rgb({r}, {g}, {b});\n"
-        "  line-height: 1.15;\n"
-        "  font-variant-ligatures: none;\n"
-        "  font-feature-settings: \"liga\" 0, \"clig\" 0, \"dlig\" 0, \"hlig\" 0;\n"
-        "}\n"
-        "b { font-weight: bold; }\n"
-    )
-    html = f"<html><body>{html_body}</body></html>"
-    try:
-        # insert_htmlbox returns (spare_height, scale). spare_height < 0 means
-        # the content overflowed the rect. We accept slight downward scaling
-        # (down to 0.94) to match the textbox path's behavior.
-        spare, scale = page.insert_htmlbox(
-            rect, html, css=css, scale_low=0.94, rotate=0,
-        )
-    except Exception:
-        return False
-    return spare >= 0
+    space_w = pymupdf.get_text_length(" ", fontname=fontname_reg, fontsize=size)
+    lines: List[List[Tuple[str, bool, float]]] = []
+    cur: List[Tuple[str, bool, float]] = []
+    cur_w = 0.0
+    for word, is_bold, w in words:
+        wants_space = bool(cur) and word[:1] not in _ATTACHING_PUNCT
+        added = (space_w if wants_space else 0) + w
+        if cur and cur_w + added > max_width:
+            lines.append(cur)
+            cur = [(word, is_bold, w)]
+            cur_w = w
+        else:
+            cur.append((word, is_bold, w))
+            cur_w += added
+    if cur:
+        lines.append(cur)
+    return lines
 
 
+def _render_lines(
+    page,
+    lines: List[List[Tuple[str, bool, float]]],
+    x0: float,
+    baseline_y: float,
+    line_height: float,
+    size: float,
+    color: Tuple[float, float, float],
+    fontname_reg: str,
+    fontname_bold: str,
+    space_w: float,
+) -> None:
+    """Place each word at the computed (x, baseline_y) via insert_text.
+    Regular and bold runs use the same base-14 family so visual weight is
+    consistent and Latin-1 glyphs render cleanly (no ligature substitution).
+    Attaching punctuation gets no leading space — keeps `~70%,` rendered
+    tight, not as `~70% ,`."""
+    for line_idx, line in enumerate(lines):
+        y = baseline_y + line_idx * line_height
+        x = x0
+        for i, (word, is_bold, w) in enumerate(line):
+            font = fontname_bold if is_bold else fontname_reg
+            page.insert_text(
+                (x, y), word,
+                fontname=font, fontsize=size, color=color,
+            )
+            x += w
+            if i < len(line) - 1:
+                next_word = line[i + 1][0]
+                if next_word[:1] not in _ATTACHING_PUNCT:
+                    x += space_w
 
 
 def _block_bbox(block: PdfBlock) -> Tuple[float, float, float, float]:
@@ -315,81 +348,67 @@ def apply_rewrites(
 
 
 def _insert_into_block(page, blk: PdfBlock, new_text: str) -> None:
-    """Place new_text inside the block's bbox using the first span's style.
+    """Render new_text into the block's bbox via manual per-word layout.
 
-    Two-phase strategy:
-      Phase A: try insert_htmlbox so resume-convention metrics (numbers,
-        percentages, '5+', '~70%' etc.) render in bold — matching how the
-        original PDF emphasises quantitative wins.
-      Phase B: fall back to insert_textbox with shrink-to-fit if the HTML
-        path fails or overflows.
+    Strategy: tokenise text into regular/bold runs (bold = quantitative
+    tokens like "5+", "~70%", "10K+"), wrap into lines using
+    `pymupdf.get_text_length`, then place each word individually with
+    `page.insert_text`. This keeps the rewritten text in the same base-14
+    family (helv/hebo) as the rest of the document — consistent visual
+    weight, no NimbusSans/Helvetica mixing, and no font-driven ligature
+    substitution (helv doesn't have fi/fl ligatures, so "fine-tuning"
+    extracts cleanly for ATS keyword matching).
 
-    Why fall back: insert_htmlbox uses PyMuPDF's Story renderer which has
-    slightly different layout semantics than insert_textbox. If it can't
-    fit the text in the rect, it returns negative spare_height and we
-    drop down to the more reliable textbox path.
+    If the text needs more vertical lines than the original block had, we
+    truncate from the tail at word boundaries rather than shrinking the
+    font — so all bullets stay at the same visual size.
     """
     import pymupdf
 
     template = blk.spans[0]
     base_size = template.size
     color = _color_tuple(template.color)
-    fontname = _pick_base_font(template)
+    family = _font_family(template.font)
+    fontname_reg = _BASE_FONT[(family, "regular")]
+    fontname_bold = _BASE_FONT[(family, "bold")]
 
     x0, y0, x1, y1 = _block_bbox(blk)
-    # Expand the box vertically a bit; the original block bbox is sometimes
-    # measured tight to the glyph caps and a tiny font size mismatch can push
-    # us into the next line.
-    rect = pymupdf.Rect(x0, y0 - 1, x1 + 1, y1 + max(2, base_size * 0.3))
+    # Available width: the original block plus a tiny right-edge slack so a
+    # similarly-sized rewrite doesn't get pushed onto an extra line by a
+    # single-pixel measurement difference.
+    max_width = (x1 - x0) + 4
 
-    # Phase A: HTML with auto-bolded metrics.
-    if _try_insert_html(page, rect, new_text, base_size, color):
-        return
+    line_height = base_size * 1.18
+    # First line baseline sits at roughly cap-top + 0.8 * size. Subsequent
+    # lines step down by line_height.
+    baseline_y = y0 + base_size * 0.82
 
-    # Narrow shrink-to-fit range (max 6% reduction) so neighbouring bullets
-    # don't end up at visibly different sizes. The rewriter already enforces
-    # a per-bullet char budget, so text that lands here should almost always
-    # fit at 1.0×; the 0.97/0.94 fallbacks are for occasional overflows.
-    for scale in (1.0, 0.97, 0.94):
-        size = base_size * scale
-        rc = page.insert_textbox(
-            rect,
-            new_text,
-            fontname=fontname,
-            fontsize=size,
-            color=color,
-            align=pymupdf.TEXT_ALIGN_LEFT,
-        )
-        if rc >= 0:
-            return
+    # Vertical room: the original block height plus a small descender margin.
+    available_height = (y1 - y0) + base_size * 0.5
+    max_lines = max(1, int(available_height / line_height) + 1)
 
-    # Doesn't fit even at 0.94× — truncate the text rather than shrink further,
-    # so all bullets stay at the same visual size. Cut at word boundaries so
-    # we never end with "language mod." or similar mid-word stubs.
-    truncated = new_text
-    while len(truncated) > 20:
-        target = int(len(truncated) * 0.9)
-        # Back off to the nearest preceding space within a 40-char window so
-        # we never split a word. Falls back to a hard cut if no space found.
-        sp = truncated.rfind(" ", max(20, target - 40), target)
-        cut = sp if sp >= 20 else target
-        truncated = truncated[:cut].rstrip(" ,;.:") + "."
-        rc = page.insert_textbox(
-            rect,
-            truncated,
-            fontname=fontname,
-            fontsize=base_size * 0.94,
-            color=color,
-            align=pymupdf.TEXT_ALIGN_LEFT,
-        )
-        if rc >= 0:
-            return
+    lines = _layout_lines(new_text, fontname_reg, fontname_bold, base_size, max_width)
 
-    # Last resort fallback — write whatever fits as plain text at the position.
-    page.insert_text(
-        (x0, y0 + base_size),
-        new_text[:120],
-        fontname=fontname,
-        fontsize=base_size * 0.94,
+    # Truncate by trailing words if we'd overflow the original block height.
+    if len(lines) > max_lines:
+        words = new_text.split()
+        while len(words) > 6:
+            words.pop()
+            candidate = " ".join(words).rstrip(" ,;:.") + "."
+            lines = _layout_lines(candidate, fontname_reg, fontname_bold, base_size, max_width)
+            if len(lines) <= max_lines:
+                break
+        lines = lines[:max_lines]
+
+    space_w = pymupdf.get_text_length(" ", fontname=fontname_reg, fontsize=base_size)
+    _render_lines(
+        page, lines,
+        x0=x0,
+        baseline_y=baseline_y,
+        line_height=line_height,
+        size=base_size,
         color=color,
+        fontname_reg=fontname_reg,
+        fontname_bold=fontname_bold,
+        space_w=space_w,
     )

@@ -20,7 +20,7 @@ from slowapi.util import get_remote_address
 from backend.agents.llm import LLM
 from backend.agents.orchestrator import run_pipeline
 from backend.config import get_settings
-from backend.models import HealthResponse, TailorResponse, CoverLetterResponse
+from backend.models import TailorResponse, CoverLetterResponse
 from backend.parsers.pdf_parser import ResumeFormatError
 from backend import quota as quota_store
 
@@ -100,7 +100,7 @@ app.add_middleware(
         "X-User-Provider",
         "X-User-API-Key",
     ],
-    expose_headers=["X-Shared-Quota-Remaining"],
+    expose_headers=["X-Shared-Quota-Remaining", "X-Fallback-Used"],
 )
 
 
@@ -151,9 +151,60 @@ async def index() -> HTMLResponse:
     )
 
 
-@app.get("/health", response_model=HealthResponse)
-async def health() -> HealthResponse:
-    return HealthResponse(model=settings.anthropic_model)
+@app.get("/health")
+async def health() -> JSONResponse:
+    """Liveness probe AND provider-health diagnostic.
+
+    Returns the basic legacy fields ({status, version, model}) plus an
+    expanded `providers` array showing each configured provider's current
+    health, last error, cooldown end, and failure rate. Used by the
+    frontend's banner to surface a "free pool is overloaded" hint before
+    the user submits.
+    """
+    from backend.agents.llm import provider_health_snapshot
+    from datetime import datetime, timezone
+
+    snap = provider_health_snapshot()
+    base_names = ["groq", "gemini", "xai", "openai", "anthropic"]
+
+    providers: list[dict] = []
+    for name in base_names:
+        configured = bool({
+            "groq": settings.groq_api_key,
+            "gemini": settings.gemini_api_key,
+            "xai": settings.xai_api_key,
+            "openai": settings.openai_api_key,
+            "anthropic": settings.anthropic_api_key,
+        }.get(name))
+        h = snap.get(name, {})
+        cool_until_epoch = h.get("cool_until_epoch")
+        cool_until_iso = (
+            datetime.fromtimestamp(cool_until_epoch, tz=timezone.utc).isoformat()
+            if cool_until_epoch else None
+        )
+        providers.append({
+            "name": name,
+            "configured": configured,
+            # Healthy = configured AND not in a cooldown window.
+            "healthy": configured and h.get("healthy", True),
+            "cool_until": cool_until_iso,
+            "last_error_category": h.get("last_error_category"),
+            "consecutive_failures": h.get("consecutive_failures", 0),
+            "total_calls": h.get("total_calls", 0),
+            "failure_rate": h.get("failure_rate", 0.0),
+        })
+
+    body = {
+        "status": "ok",
+        "version": "0.4.0",
+        "model": settings.anthropic_model,
+        "providers": providers,
+        "shared_quota": {
+            "limit": settings.shared_daily_quota,
+            "reset": "midnight UTC",
+        },
+    }
+    return JSONResponse(content=body)
 
 
 def _safe_filename(name: str | None) -> str:
@@ -209,6 +260,17 @@ def _build_byok_llm(provider: str | None, key: str | None) -> LLM | None:
     except ValueError as e:
         # ValueError messages are crafted to never include the key.
         raise HTTPException(status_code=400, detail=f"BYOK rejected: {e}") from e
+
+
+def _byok_should_fall_through(err: Exception) -> bool:
+    """When a BYOK call fails, decide whether to retry on the shared chain.
+    We fall through on transient/quota errors (the user's key is fine,
+    they're just rate-limited or out of daily allowance). We do NOT fall
+    through on auth errors — a bad user-provided key should surface so
+    they can fix it; falling through would mask the typo."""
+    from backend.agents.llm import _categorize_error
+    cat = _categorize_error(err)
+    return cat in ("quota", "transient", "unknown")
 
 
 @app.get("/api/quota")
@@ -269,6 +331,10 @@ async def tailor(
 
     cover_pdf_path = OUTPUT_DIR / f"cover-{uuid.uuid4().hex}.pdf" if cover_letter else None
 
+    # `fallback_used` tracks which chain actually served the request so we
+    # can return it as an `X-Fallback-Used` header for the frontend.
+    fallback_used = "byok" if using_user_key else "shared"
+
     try:
         result = run_pipeline(
             resume_docx_path=saved,
@@ -282,8 +348,40 @@ async def tailor(
         logger.warning("Resume format rejected: %s", e)
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
-        logger.exception("Pipeline failed at step")
-        raise HTTPException(status_code=500, detail=f"Pipeline failed: {type(e).__name__}: {e}") from e
+        # BYOK-fallback path: if the user's key failed due to quota/transient
+        # AND the operator has shared keys configured AND quota allows,
+        # retry on the shared chain transparently. Mask the failure
+        # behind a successful response.
+        if (
+            using_user_key
+            and settings.byok_fallback_to_shared
+            and _byok_should_fall_through(e)
+            and _have_any_key()
+            and not quota_store.is_exhausted(client_ip, settings.shared_daily_quota)
+        ):
+            logger.warning(
+                "BYOK call failed (%s); falling through to shared pool: %s",
+                type(e).__name__, str(e)[:160],
+            )
+            try:
+                result = run_pipeline(
+                    resume_docx_path=saved,
+                    jd_text=jd,
+                    output_path=out_path,
+                    want_cover_letter=cover_letter,
+                    cover_letter_pdf_path=cover_pdf_path,
+                    llm_override=None,  # use the shared auto chain
+                )
+                fallback_used = "byok-then-shared"
+                using_user_key = False  # so we count the shared usage below
+            except ResumeFormatError as e2:
+                raise HTTPException(status_code=400, detail=str(e2)) from e2
+            except Exception as e2:
+                logger.exception("Shared-pool fallback also failed")
+                raise HTTPException(status_code=500, detail=f"Pipeline failed: {type(e2).__name__}: {e2}") from e2
+        else:
+            logger.exception("Pipeline failed at step")
+            raise HTTPException(status_code=500, detail=f"Pipeline failed: {type(e).__name__}: {e}") from e
 
     # Count shared usage only on success.
     if not using_user_key:
@@ -309,10 +407,13 @@ async def tailor(
         ats_score=result.ats_score,
         cover_letter=result.cover_letter_text,
         cover_letter_url=cover_url,
+        # Note: TailorResponse may not declare these; we still set the header
+        # at the response layer below for the frontend to consume.
         warnings=result.warnings,
     )
     resp = JSONResponse(content=body.model_dump())
     resp.headers["X-Shared-Quota-Remaining"] = str(remaining_after)
+    resp.headers["X-Fallback-Used"] = fallback_used
     return resp
 
 
@@ -322,14 +423,48 @@ async def cover_letter_only(
     request: Request,
     resume: UploadFile = File(...),
     jd: str = Form(...),
-) -> CoverLetterResponse:
-    """Skip resume rewriting and just generate a cover letter (returns text +
-    a downloadable PDF URL)."""
-    if not _have_any_key():
-        raise HTTPException(status_code=503, detail="Server has no API key set for the chosen LLM_PROVIDER. Add it to .env.")
+) -> JSONResponse:
+    """Generate a cover letter without modifying the resume.
+
+    Honors the same BYOK headers (`X-User-Provider` + `X-User-API-Key`) and
+    the same shared per-IP daily quota as `/tailor`, so users can't bypass
+    the quota by switching modes. The response includes the plain text AND
+    a base64-encoded .docx so the frontend can offer a download without a
+    second HTTP request.
+    """
+    if not jd or not jd.strip():
+        raise HTTPException(status_code=400, detail="Job description is required.")
+
+    # BYOK resolution mirrors /tailor exactly.
+    byok_provider = request.headers.get("X-User-Provider")
+    byok_key = request.headers.get("X-User-API-Key")
+    user_llm = _build_byok_llm(byok_provider, byok_key)
+    using_user_key = user_llm is not None
+    client_ip = get_remote_address(request)
+
+    if using_user_key:
+        logger.info("Cover-letter using BYOK provider=%s ip=%s", (byok_provider or "").lower(), client_ip)
+    else:
+        if not _have_any_key():
+            raise HTTPException(
+                status_code=503,
+                detail="Server has no shared API key configured. Add your own key in the BYOK panel.",
+            )
+        if quota_store.is_exhausted(client_ip, settings.shared_daily_quota):
+            payload = {
+                "error": "shared_quota_exhausted",
+                "message": "Daily shared quota reached. Add your own API key to keep going.",
+                "remaining": 0,
+            }
+            resp = JSONResponse(status_code=429, content=payload)
+            resp.headers["X-Shared-Quota-Remaining"] = "0"
+            return resp
+
     saved = _save_upload(resume, UPLOAD_DIR)
 
     # We only need the candidate's structured data for the cover letter.
+    # NOTE: this endpoint NEVER writes anything to the user's resume file
+    # nor produces a tailored resume — it only reads `saved` for context.
     from backend.agents import jd_analyzer, resume_analyzer, cover_letter as cl_agent
 
     if saved.suffix.lower() == ".pdf":
@@ -350,25 +485,115 @@ async def cover_letter_only(
         heuristic = parsed_to_analysis(parsed)
         full_text = parsed.full_text
 
-    resume_an = resume_analyzer.analyze(full_text, heuristic=heuristic)
-    jd_an = jd_analyzer.analyze(jd)
-    text = cl_agent.generate(jd_an, resume_an)
+    fallback_used = "byok" if using_user_key else "shared"
 
-    cover_pdf_path = OUTPUT_DIR / f"cover-{uuid.uuid4().hex}.pdf"
+    def _run_cover_letter(llm_obj):
+        ra = resume_analyzer.analyze(full_text, heuristic=heuristic, llm=llm_obj)
+        ja = jd_analyzer.analyze(jd, llm=llm_obj)
+        tx = cl_agent.generate(ja, ra, llm=llm_obj)
+        return ra, ja, tx
+
     try:
-        from backend.writers.cover_letter_pdf import render_cover_letter_pdf
-        render_cover_letter_pdf(
-            text,
-            cover_pdf_path,
-            candidate_name=resume_an.candidate_name or None,
-            contact=resume_an.contact or None,
-        )
-        download_url = f"/download/{cover_pdf_path.name}"
-    except Exception:
-        logger.exception("Cover letter PDF render failed")
-        download_url = None
+        resume_an, jd_an, text = _run_cover_letter(user_llm)
+    except cl_agent.CoverLetterIncompleteError as e:
+        # Controlled failure — the model returned a body that's too short or
+        # syntactically unfinished, even after one retry. Surface as 503 so
+        # the client can retry without thinking it's a bug.
+        logger.warning("Cover-letter incomplete after retry: %s", e)
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Cover letter generation incomplete (the model returned a "
+                "truncated body). Please retry — this is usually transient."
+            ),
+        ) from e
+    except Exception as e:
+        # BYOK-fallback: same logic as /tailor. If user's key failed
+        # for a transient/quota reason and the operator has a shared pool
+        # with quota left, transparently retry there.
+        if (
+            using_user_key
+            and settings.byok_fallback_to_shared
+            and _byok_should_fall_through(e)
+            and _have_any_key()
+            and not quota_store.is_exhausted(client_ip, settings.shared_daily_quota)
+        ):
+            logger.warning(
+                "BYOK cover-letter call failed (%s); falling through to shared pool: %s",
+                type(e).__name__, str(e)[:160],
+            )
+            try:
+                resume_an, jd_an, text = _run_cover_letter(None)
+                fallback_used = "byok-then-shared"
+                using_user_key = False
+            except Exception as e2:
+                logger.exception("Shared-pool fallback also failed for cover-letter")
+                raise HTTPException(status_code=500, detail=f"Cover letter generation failed: {type(e2).__name__}: {e2}") from e2
+        else:
+            logger.exception("Cover-letter pipeline failed")
+            raise HTTPException(status_code=500, detail=f"Cover letter generation failed: {type(e).__name__}: {e}") from e
 
-    return CoverLetterResponse(text=text, download_url=download_url)
+    # Count shared usage only on success.
+    if not using_user_key:
+        quota_store.record_usage(client_ip)
+    remaining_after = (
+        quota_store.remaining(client_ip, settings.shared_daily_quota)
+        if not using_user_key
+        else settings.shared_daily_quota
+    )
+
+    # Build the editorial .docx + .pdf in memory and base64-encode both.
+    # The PDF is rendered by a separate reportlab-based writer so the two
+    # formats stay visually consistent without sharing a renderer.
+    import base64
+
+    candidate_name = (resume_an.candidate_name or "").strip()
+    slug = cl_agent.slugify_name(candidate_name)
+
+    headline = (getattr(resume_an, "candidate_headline", "") or "").strip()
+
+    docx_b64: str | None = None
+    docx_filename: str | None = None
+    try:
+        docx_bytes = cl_agent.build_cover_letter_docx(
+            text,
+            candidate_name=candidate_name or None,
+            contact=resume_an.contact or None,
+            candidate_headline=headline or None,
+        )
+        docx_b64 = base64.b64encode(docx_bytes).decode("ascii")
+        docx_filename = f"cover-letter-{slug}.docx"
+    except Exception:
+        logger.exception("Cover-letter docx build failed")
+
+    pdf_b64: str | None = None
+    pdf_filename: str | None = None
+    try:
+        from backend.writers.letter_pdf import build_cover_letter_pdf
+        pdf_bytes = build_cover_letter_pdf(
+            text,
+            candidate_name=candidate_name or None,
+            contact=resume_an.contact or None,
+            candidate_headline=headline or None,
+        )
+        pdf_b64 = base64.b64encode(pdf_bytes).decode("ascii")
+        pdf_filename = f"cover-letter-{slug}.pdf"
+    except Exception:
+        logger.exception("Cover-letter pdf build failed")
+
+    body = CoverLetterResponse(
+        text=text,
+        docx_b64=docx_b64,
+        docx_filename=docx_filename,
+        pdf_b64=pdf_b64,
+        pdf_filename=pdf_filename,
+        # Legacy alias so older frontends reading `filename` still work.
+        filename=docx_filename,
+    )
+    resp = JSONResponse(content=body.model_dump())
+    resp.headers["X-Shared-Quota-Remaining"] = str(remaining_after)
+    resp.headers["X-Fallback-Used"] = fallback_used
+    return resp
 
 
 @app.get("/download/{name}")
