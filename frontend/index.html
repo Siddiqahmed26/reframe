@@ -1256,11 +1256,19 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <script>
   (function () {
-    // Resolve the API base. Empty meta = same-origin. When deployed to a static
-    // host like Vercel that points at a separate API (e.g. the HF Space), set
-    // <meta name="reframe-api" content="https://..."> in the document.
+    // Resolve the API base. Priority:
+    //   1. Explicit <meta name="reframe-api" content="https://..."> wins.
+    //   2. Else, if the page is loaded from an HF Space (*.hf.space), use
+    //      same-origin — the api is on the same container.
+    //   3. Else (Vercel / custom domain / localhost mirror), default to
+    //      the HF Space URL. Override per-deploy via the meta tag.
     const _apiMeta = document.querySelector('meta[name="reframe-api"]');
-    const API_BASE = (_apiMeta && _apiMeta.getAttribute('content') || '').replace(/\/$/, '');
+    const _metaContent = (_apiMeta && _apiMeta.getAttribute('content') || '').replace(/\/$/, '').trim();
+    const _onHF = /\.hf\.space$/i.test(location.hostname);
+    const _onLocal = /^(localhost|127\.0\.0\.1|\[::1\])$/i.test(location.hostname);
+    const API_BASE =
+      _metaContent ||
+      (_onHF || _onLocal ? '' : 'https://siddiq262001-reframe.hf.space');
     const apiUrl = (path) => API_BASE + path;
 
     const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
