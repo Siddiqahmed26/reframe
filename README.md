@@ -6,7 +6,7 @@ colorTo: indigo
 sdk: docker
 app_port: 8000
 pinned: false
-short_description: Reframe your resume for any role. Same fonts, same layout, only the words change.
+short_description: Tailor your resume for any role. Same layout, new words.
 ---
 
 # reframe
